@@ -1,57 +1,29 @@
 # Umbarila Gutiérrez & Asociados
 
-Landing estática migrada el 6 de septiembre de 2026 desde https://umbarila-gutierrez-asociados.brcris.chatgpt.site. GitHub es la fuente mantenible desde esta versión.
+Sitio estático de la firma. GitHub es la fuente del proyecto.
 
-## Archivos
+## Desarrollo y publicación
 
-- `index.html`: contenido, anclas, FAQ nativa con `details` y formulario visual.
-- `assets/css/styles.css`: estilos e identidad visual originales, conservando la cascada y todos los breakpoints.
-- `assets/js/main.js`: menú, selección del área, año, CTA y preparación del formulario.
-- `assets/js/config.js`: configuración pública inicialmente vacía. Nunca incluir secretos.
-- `assets/images/`: ambos logos originales, sin modificar.
-- `robots.txt`: bloqueo de rastreo durante la preparación.
-- `sitemap.xml`: plantilla vacía; el build incorpora la URL real del despliegue.
-- `scripts/build.mjs`: copia los archivos públicos a `dist/`, sin dependencias.
+Requiere Node.js 18 o posterior. Ejecutar `node scripts/build.mjs` y servir `dist/` desde la raíz de un servidor HTTP. No requiere instalar dependencias de producción. Se conserva el flujo de Cloudflare Pages: rama de producción `main`, comando `node scripts/build.mjs` y directorio `dist`.
 
-Se retiró el script de desafío inyectado por el alojamiento original. No hay dependencias de chatgpt.site, frameworks ni fuentes remotas.
+El build usa `SITE_URL` o `CF_PAGES_URL` para el sitemap. Se mantiene el bloqueo de indexación hasta la aprobación del lanzamiento. Esta actualización no cambia el alojamiento ni el dominio.
 
-## Cloudflare Pages
+## Identidad y contenido 2026
 
-Conectar este repositorio desde Workers & Pages → Create application → Pages → Import an existing Git repository.
+- Fotografía de Bogotá y emblema dorado proporcionados por la firma.
+- Azul #022e68, gris #383838 y dorado #edc773.
+- Cinco áreas: Administrativo, Laboral, Civil, Familia y Comercial.
+- Textos de compromiso, proceso y preguntas frecuentes actualizados.
+- Se retiran la sección de equipo y el selector de área de consulta.
+- `assets/css/refresh.css` contiene la adaptación visual y móvil.
+- El logo horizontal actualizado se conserva en `assets/images/logo-horizontal.png`; la cabecera y el banner combinan el emblema original dorado con texto accesible.
 
-| Opción                 | Valor                        |
-| ---------------------- | ---------------------------- |
-| Rama de producción     | `main`                       |
-| Framework preset       | `None`                       |
-| Root directory         | raíz del repositorio (vacío) |
-| Build command          | `node scripts/build.mjs`     |
-| Build output directory | `dist`                       |
+## Contacto y opiniones
 
-Requiere Node.js 18 o posterior, sin instalar paquetes. `CF_PAGES_URL`, proporcionada por Pages, genera el sitemap del despliegue. Al conectar el dominio definitivo, definir `SITE_URL` con su origen HTTPS y volver a desplegar. Esta migración no crea el proyecto de Pages ni modifica DNS.
+`assets/js/config.js` centraliza el WhatsApp 573194532248, el correo umbarilagutierrez.asoc@gmail.com y los enlaces sociales. Instagram, Facebook y LinkedIn se muestran con sus iconos solo cuando la firma proporciona sus URLs HTTPS oficiales; no se inventan perfiles.
 
-Guía oficial: https://developers.cloudflare.com/pages/framework-guides/deploy-anything/
+El botón flotante indica que el visitante viene de la web. El formulario de asesoría prepara un mensaje con los datos y el consentimiento. La calificación de 1 a 5 estrellas y el comentario preparan otro mensaje privado. El visitante revisa y confirma el envío en WhatsApp; abrirlo no equivale a una recepción confirmada.
 
-## Revisión local
+Los formularios no almacenan datos ni publican testimonios. No hay backend, analítica ni envío automático. Si la apertura es bloqueada, se ofrece un enlace para continuar. Sin JavaScript los formularios permanecen deshabilitados y los enlaces directos de contacto siguen disponibles.
 
-Ejecutar `node scripts/build.mjs` y servir `dist/` con un servidor HTTP estático. Las rutas comienzan por `/`: abrir desde la raíz HTTP, no mediante `file://` ni desde un subdirectorio de GitHub Pages.
-
-## Formulario y siguiente fase
-
-El formulario conserva su apariencia, campos y aviso de preparación. El `fieldset` permanece deshabilitado también sin JavaScript. Con la configuración vacía no se carga Turnstile ni se envían solicitudes. No hay backend ni almacenamiento de consultas.
-
-El código original está preparado para un endpoint HTTPS, una clave pública Turnstile y la URL HTTPS de una política aprobada. Solo cuando existan los tres se habilita el flujo. El futuro servidor debe validar datos y consentimiento, verificar Turnstile (incluidos hostname y action `contact`), atender el honeypot y limitar solicitudes. Recibe JSON con `name`, `email`, `phone`, `area`, `message`, `website`, `consent` booleano y `token`; el cliente espera `{ "ok": true }` al confirmar el registro. Esta integración todavía no está probada ni activada.
-
-`whatsappNumber` y `contactEmail` siguen vacíos; los enlaces se muestran al configurarlos. Se conservan los avisos de equipo y testimonios pendientes.
-
-No se crea `privacy/index.html`: la fuente no incluye una política aprobada y `privacyPolicyUrl` está vacío. Incorporar y enlazar la política definitiva antes de activar el formulario.
-
-## Lanzamiento definitivo
-
-1. Conectar Pages y revisar su URL temporal.
-2. Asociar el dominio real y confirmar HTTPS.
-3. Completar política, canales e integración del formulario en la siguiente fase.
-4. Tras aprobar la publicación, retirar `noindex,nofollow` del HTML y cambiar `Disallow: /` por `Allow: /` en `robots.txt`. Añadir allí la URL absoluta del sitemap, configurar `SITE_URL` y añadir canonical con el dominio real.
-
-## Verificación de migración
-
-Comparación estructural del HTML y de las reglas CSS frente a la fuente, revisión de recursos y anclas, seis áreas de práctica, cinco FAQ y comprobación de menú/selección del área con configuración inactiva. La comparación visual en navegador queda pendiente. No se activó ni probó el backend.
+La representación requiere los acuerdos descritos en las preguntas frecuentes. Una futura recepción directa en la web requerirá implementar su servidor e incorporar la política de tratamiento aprobada por la firma.

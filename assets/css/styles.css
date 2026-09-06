@@ -1,10 +1,10 @@
 /* Estilos originales de la landing. Las reglas de identidad se conservan al final para mantener la cascada. */
 :root {
-  --petrol: #03263a;
-  --deep: #021e30;
-  --gold: #e6bd62;
-  --ink: #082c42;
-  --muted: #576b6f;
+  --petrol: #022e68;
+  --deep: #022e68;
+  --gold: #edc773;
+  --ink: #383838;
+  --muted: #595959;
   --line: #dce3e3;
   --paper: #f4f7f7;
   --white: #fff;

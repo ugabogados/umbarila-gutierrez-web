@@ -1,0 +1,110 @@
+/* Identidad 2026: azul #022e68, gris #383838 y dorado #edc773. */
+.header { background: var(--petrol); color: white; border-bottom-color: #ffffff24; }
+.header-inner { min-height: 88px; }
+.brand-symbol { width: 64px; height: 49px; }
+.brand { font-size: 16px; letter-spacing: 1.2px; }
+.brand small { font-size: 12px; }
+.nav-cta { border-color: var(--gold); color: var(--gold); }
+nav a:not(.nav-cta):hover { color: var(--gold); }
+.hero { position: relative; isolation: isolate; background: #022e68; }
+.hero::before { content: ""; position: absolute; inset: 0; z-index: -2; background: linear-gradient(90deg, #00162fee 0%, #001b36df 35%, #011b3580 65%, #00152e30), url('/assets/images/bogota-atardecer.png') center 55% / cover; }
+.hero::after { content: ""; position: absolute; pointer-events: none; z-index: -1; width: 890px; height: 1050px; right: -240px; top: -170px; border: 1px solid #edc773b0; border-radius: 50%; transform: rotate(25deg); }
+.hero-grid { grid-template-columns: 1.35fr 1fr; gap: 80px; min-height: 590px; padding-block: 60px 45px; }
+.hero h1 { font-size: clamp(46px, 4.8vw, 70px); line-height: 1.05; letter-spacing: -1.6px; }
+.hero-description { max-width: 530px; color: #f0f1f3; font-size: 17px; line-height: 1.75; }
+.hero .eyebrow { font-size: 11px; letter-spacing: 2.3px; }
+.hero-aside { background: transparent; max-width: 350px; justify-self: center; width: 100%; padding: 0 20px; }
+.hero-logo { width: 235px; max-width: 100%; height: auto; }
+.hero-wordmark { font-family: var(--brand-serif); font-size: 26px; color: var(--gold); text-align: center; line-height: 1.04; margin: 18px 0 26px; }
+.hero-wordmark small { font-size: 22px; }
+.aside-bottom { border-top: 1px solid #edc7738a; padding-top: 20px; }
+.aside-bottom > p { font-size: 25px; }
+.aside-bottom small { letter-spacing: 1.8px; font-size: 11px; text-transform: uppercase; color: #fff; }
+.gold { background: var(--gold); color: var(--petrol); }
+.gold:hover { background: #f4d796; }
+.hero .text-link { border-color: var(--gold); margin-left: 20px; }
+.trust-strip { border-top-color: #ffffff30; gap: 38px; padding-block: 25px; font-size: 13px; }
+.trust-strip span { display: flex; align-items: center; }
+.trust-strip span::before { content: "◇"; font-size: 23px; line-height: 1; }
+h2, .service h3 { color: var(--petrol); }
+.process h2 { color: white; }
+.services-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.service { padding: 28px 22px; }
+.service h3 { font-size: 25px; }
+.service p { font-size: 15px; }
+.service:hover { background: #022e6808; }
+.about-grid { grid-template-columns: .85fr 1.35fr; gap: 70px; }
+.principles { grid-template-columns: 1fr; gap: 28px; }
+.principles > div { display: grid; grid-template-columns: 30px 1fr; column-gap: 12px; }
+.principles h3 { font-size: 25px; margin: 0 0 8px; color: var(--petrol); }
+.principles span { padding-top: 5px; }
+.principles p { grid-column: 2; font-size: 16px; line-height: 1.8; }
+.steps h3 { font-size: 24px; }
+.process .eyebrow { color: var(--gold); }
+.opinions-grid { grid-template-columns: 1fr 1fr; gap: 70px; }
+.feedback-form { padding-left: 32px; border-left: 2px solid var(--gold); min-width: 0; }
+.feedback-form h3 { font-size: 28px; margin-bottom: 22px; }
+.rating legend { font-size: 14px; }
+.rating-options { display: flex; gap: 8px; margin: 8px 0; }
+.rating-options label { position: relative; margin: 0; cursor: pointer; }
+.rating-options input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.rating-options label > span[aria-hidden] { display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid #bbc4d0; border-radius: 4px; color: #657080; font-size: 32px; }
+.rating-options .is-filled > span[aria-hidden] { background: var(--gold); border-color: var(--gold); color: var(--petrol); }
+.rating-options label:hover > span[aria-hidden] { border-color: var(--petrol); }
+.rating-options input:focus-visible + span { outline: 3px solid var(--petrol); outline-offset: 3px; }
+.form-status a, #feedback-status a { text-decoration: underline; font-weight: 600; }
+.contact-grid { grid-template-columns: .95fr 1.2fr; gap: 65px; }
+.contact-channels { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.contact-channels .text-link { overflow-wrap: anywhere; max-width: 100%; margin: 0; }
+.social-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 25px; }
+.social-links a { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); padding: 10px 12px; color: var(--petrol); font-size: 14px; }
+.social-links a:hover { background: white; }
+.contact-form .form-row:has(> label:only-child) { grid-template-columns: 1fr; }
+footer { padding-bottom: 90px; }
+footer .brand-symbol { display: block; }
+footer .brand { color: white; font-size: 16px; }
+.whatsapp-float { position: fixed; right: 24px; bottom: max(24px, env(safe-area-inset-bottom)); z-index: 20; display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-radius: 32px; background: var(--gold); color: var(--petrol); box-shadow: 0 4px 24px #00152e40; font-size: 15px; font-weight: 600; border: 1px solid #fff8; }
+.whatsapp-float:hover { background: #f4d796; }
+@media (min-width: 1500px) { .hero-grid { min-height: 660px; padding-block: 75px 55px; } }
+@media (max-width: 1100px) {
+  .hero-grid { gap: 35px; grid-template-columns: 1.35fr 1fr; }
+  .hero .text-link { display: flex; width: fit-content; margin: 14px 0 0; }
+  .services-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .service { grid-column: span 2; }
+  .service:nth-last-child(-n+2) { grid-column: span 3; }
+  .trust-strip { gap: 22px; flex-wrap: wrap; }
+  .contact-grid, .about-grid, .opinions-grid { gap: 40px; }
+}
+@media (max-width: 760px) {
+  .header-inner { min-height: 80px; padding-block: 12px; gap: 10px; }
+  .brand { font-size: 12px; letter-spacing: .5px; gap: 10px; }
+  .brand-symbol { width: 46px; height: 35px; }
+  .brand small { font-size: 10px; }
+  .menu-toggle { padding: 8px; background: transparent; border-color: #ffffff50; color: white; }
+  .hero-grid { grid-template-columns: 1fr; gap: 38px; padding-block: 45px 30px; }
+  .hero h1 { font-size: clamp(40px, 8.8vw, 60px); letter-spacing: -1px; }
+  .hero::before { background: linear-gradient(180deg, #001b36e8, #001b36d9 45%, #001b3670), url('/assets/images/bogota-atardecer.png') 64% center / cover; }
+  .hero::after { right: -590px; top: 60px; }
+  .hero-aside { max-width: 300px; padding: 0; }
+  .hero-logo { width: 145px; }
+  .hero-wordmark { font-size: 21px; margin: 12px 0 22px; }
+  .hero-wordmark small { font-size: 18px; }
+  .aside-bottom > p { font-size: 23px; }
+  .trust-strip { flex-direction: column; gap: 14px; padding-block: 22px; }
+  .services-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .service, .service:nth-last-child(-n+2) { grid-column: auto; }
+  .service:last-child { grid-column: 1 / -1; }
+  .about-grid, .opinions-grid, .contact-grid { grid-template-columns: 1fr; gap: 30px; }
+  .feedback-form { padding: 0; border: 0; }
+  .form-row { grid-template-columns: 1fr; gap: 0; }
+  .steps { gap: 24px; }
+  .steps h3 { font-size: 23px; }
+  .whatsapp-float { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); padding: 13px; }
+  .whatsapp-float span { display: none; }
+}
+@media (max-width: 380px) {
+  .services-grid, .steps { grid-template-columns: 1fr; }
+  .rating-options { gap: 6px; }
+  .rating-options label > span[aria-hidden] { width: 43px; }
+  .header .brand { font-size: 10px; }
+}
