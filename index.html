@@ -24,6 +24,7 @@
     <link rel="preload" as="image" href="/assets/images/bogota-atardecer.png" />
     <script src="/assets/js/config.js" defer></script>
     <script src="/assets/js/main.js" defer></script>
+    <script src="/assets/js/carousels.js" defer></script>
   </head>
   <body>
     <a class="skip" href="#contenido">Saltar al contenido</a>
@@ -82,8 +83,8 @@
           </aside>
         </div>
         <div class="container trust-strip">
-          <span>Atención personalizada</span><span>Asesoría y representación profesional</span
-          ><span>Manejo reservado de su información</span>
+          <span><svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11a8 8 0 0 1-8 8H7l-4 3V7a4 4 0 0 1 4-4h6a8 8 0 0 1 8 8Z"/><path d="M7 9h10M7 13h7"/></svg>Atención personalizada</span><span><svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V4h8v3M3 12a24 24 0 0 0 18 0M10 13h4"/></svg>Asesoría y representación profesional</span
+          ><span><svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>Manejo reservado de su información</span>
         </div>
       </section>
       <section class="section services" id="servicios">
@@ -97,9 +98,9 @@
               Cada proceso es único y aquí estamos para ayudarte.
             </p>
           </div>
-          <div class="services-grid">
+          <div class="services-grid mobile-carousel" id="practice-cards" data-carousel="Áreas de práctica">
             <a class="service" href="#contacto"
-              ><span class="service-number">01 <span>↗</span></span>
+              ><span class="service-number">01 <span>↗</span></span><svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m3 9 9-6 9 6M4 10h16M5 10v9m5-9v9m4-9v9m5-9v9M3 21h18"/></svg>
               <h3>Derecho<br />Administrativo</h3>
               <p>
                 Actuaciones ante entidades públicas, controversias y defensa de
@@ -108,7 +109,7 @@
             >
 
             <a class="service" href="#contacto"
-              ><span class="service-number">02 <span>↗</span></span>
+              ><span class="service-number">02 <span>↗</span></span><svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V4h8v3M3 12a24 24 0 0 0 18 0M10 13h4"/></svg>
               <h3>Derecho<br />Laboral</h3>
               <p>
                 Relaciones de trabajo, prestaciones, seguridad social y solución
@@ -116,7 +117,7 @@
               </p></a
             >
             <a class="service" href="#contacto"
-              ><span class="service-number">03 <span>↗</span></span>
+              ><span class="service-number">03 <span>↗</span></span><svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 3H5v18h14V8Zm0 0v5h5M8 12h8M8 16h6"/></svg>
               <h3>Derecho<br />Civil</h3>
               <p>
                 Contratos, obligaciones, responsabilidad civil y asuntos
@@ -124,7 +125,7 @@
               </p></a
             >
             <a class="service" href="#contacto"
-              ><span class="service-number">04 <span>↗</span></span>
+              ><span class="service-number">04 <span>↗</span></span><svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 4v3"/></svg>
               <h3>Derecho<br />de Familia</h3>
               <p>
                 Orientación en divorcios, alimentos, custodia, sucesiones y
@@ -132,7 +133,7 @@
               </p></a
             >
             <a class="service" href="#contacto"
-              ><span class="service-number">05 <span>↗</span></span>
+              ><span class="service-number">05 <span>↗</span></span><svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3v18h18M7 16v-4m5 4V9m5 7V5"/></svg>
               <h3>Derecho<br />Comercial</h3>
               <p>
                 Asesoría en contratos comerciales, sociedades y asuntos
@@ -153,20 +154,20 @@
               Somos un equipo jurídico con amplia experiencia, unidos por un objetivo común: “brindar soluciones legales efectivas y personalizadas”.
             </p>
 
-            <div class="principles">
+            <div class="principles mobile-carousel" id="principle-cards" data-carousel="Nuestros valores">
               <div>
                 <span>01</span>
-                <h3>Criterio</h3>
+                <svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6m-3-3v6"/></svg><h3>Criterio</h3>
                 <p>Conocemos y analizamos cada caso de manera integral y detallada, por ello, dedicamos el tiempo necesario para comprender las particularidades de su situación en cada asesoría.</p>
               </div>
               <div>
                 <span>02</span>
-                <h3>Transparencia</h3>
+                <svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><h3>Transparencia</h3>
                 <p>La confianza se construye sobre la verdad. Por ello, ofrecemos un análisis objetivo y transparente de cada situación. ¡No te vamos a mentir! Comunicamos con claridad las posibilidades, riesgos y alternativas que tu proceso conlleva. ¡Garantizamos información oportuna sobre el desarrollo de tu proceso y actuamos siempre en tu beneficio!</p>
               </div>
               <div>
                 <span>03</span>
-                <h3>Compromiso</h3>
+                <svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Zm-4 9 3 3 5-6"/></svg><h3>Compromiso</h3>
                 <p>Entendemos que enfrentar un proceso jurídico puede ser hostil, confuso e incierto. Por eso, te acompañamos en todas las etapas y asumimos cada asunto con absoluta dedicación para hacer valer tus derechos.</p>
               </div>
             </div>
@@ -186,24 +187,24 @@
               acompañamiento acordado.
             </p>
           </div>
-          <ol class="steps">
+          <ol class="steps mobile-carousel" id="process-cards" data-carousel="Pasos de atención">
             <li>
               <span>01</span>
-              <h3>Nos cuentas tu situación</h3>
+              <svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11a8 8 0 0 1-8 8H7l-4 3V7a4 4 0 0 1 4-4h6a8 8 0 0 1 8 8Z"/><path d="M7 9h10M7 13h7"/></svg><h3>Nos cuentas tu situación</h3>
               <p>
                 Comparte el motivo de tu consulta, los documentos que consideres necesarios y un medio de contacto.
               </p>
             </li>
             <li>
               <span>02</span>
-              <h3>Revisamos tu asunto e identificamos la información</h3>
+              <svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6m-3-3v6"/></svg><h3>Revisamos tu asunto e identificamos la información</h3>
               <p>
                 Te orientamos en asesoría.
               </p>
             </li>
             <li>
               <span>03</span>
-              <h3>Acordamos el camino</h3>
+              <svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H4v18h16V3h-4M8 2h8v4H8Z"/><path d="m8 13 3 3 5-6"/></svg><h3>Acordamos el camino</h3>
               <p>
                 Definimos el alcance, los honorarios y las condiciones del
                 servicio.
@@ -211,7 +212,7 @@
             </li>
             <li>
               <span>04</span>
-              <h3>Lo acompañamos</h3>
+              <svg class="content-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 4v3"/></svg><h3>Lo acompañamos</h3>
               <p>
                 Avanzamos en las actuaciones acordadas y comunicamos las
                 novedades.

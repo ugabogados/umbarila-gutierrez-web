@@ -27,3 +27,7 @@ El botón flotante indica que el visitante viene de la web. El formulario de ase
 Los formularios no almacenan datos ni publican testimonios. No hay backend, analítica ni envío automático. Si la apertura es bloqueada, se ofrece un enlace para continuar. Sin JavaScript los formularios permanecen deshabilitados y los enlaces directos de contacto siguen disponibles.
 
 La representación requiere los acuerdos descritos en las preguntas frecuentes. Una futura recepción directa en la web requerirá implementar su servidor e incorporar la política de tratamiento aprobada por la firma.
+
+## Navegación móvil
+
+Servicios, valores y pasos de atención se presentan como tarjetas horizontales hasta 760 px, con desplazamiento nativo, ajuste al inicio de cada tarjeta, botones anterior/siguiente y contador. El teclado admite flechas, Inicio y Fin; se respeta la preferencia de movimiento reducido. Sin JavaScript sigue disponible el desplazamiento nativo. En escritorio se conserva la distribución original. Los iconos SVG son decorativos y acompañan los títulos accesibles.
