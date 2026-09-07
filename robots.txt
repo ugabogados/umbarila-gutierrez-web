@@ -1,3 +1,3 @@
-# Mantiene el estado de prepublicación de la landing original.
 User-agent: *
-Disallow: /
+Allow: /
+Sitemap: https://ugabogados.com/sitemap.xml
