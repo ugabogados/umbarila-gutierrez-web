@@ -165,3 +165,55 @@ footer .brand { color: white; font-size: 16px; }
   .carousel-controls button:disabled { opacity: .35; }
   .process .carousel-controls { color: var(--gold); }
 }
+
+/* Navegación, contacto y movimiento discreto. */
+.header { background: #022e68f5; backdrop-filter: blur(12px); box-shadow: 0 5px 24px #00152e12; }
+.header-inner { min-height: 84px; }
+.header nav { gap: 6px; }
+.header nav > a { padding: 10px 14px; border-radius: 24px; font-size: 13px; transition: background .18s ease, color .18s ease; }
+.header nav > a:hover { background: #ffffff12; color: var(--gold); }
+.header .nav-cta { background: var(--gold); color: var(--petrol); border-color: var(--gold); margin-left: 8px; }
+.header .nav-cta:hover { background: #f4d796; color: var(--petrol); }
+.menu-bars { display: flex; flex-direction: column; gap: 6px; width: 20px; }
+.menu-bars i { display: block; width: 20px; height: 1.5px; background: currentColor; transition: transform .2s ease; }
+.menu-toggle[aria-expanded="true"] .menu-bars i:first-child { transform: translateY(3.75px) rotate(45deg); }
+.menu-toggle[aria-expanded="true"] .menu-bars i:last-child { transform: translateY(-3.75px) rotate(-45deg); }
+.phone-detail { margin: 22px 0 12px; }
+.phone-detail > span { display: block; color: var(--muted); font-size: 14px; margin-bottom: 5px; }
+.phone-detail > a { display: block; color: var(--petrol); font-size: clamp(24px, 3vw, 30px); font-weight: 600; letter-spacing: .3px; }
+.whatsapp-float { background: #25d366; color: #073b23; border-color: #ffffff80; }
+.whatsapp-float svg { color: #fff; fill: #128c7e; stroke-width: 1.5; }
+.whatsapp-float:hover { background: #20c760; }
+.footer-bottom div { flex-wrap: wrap; }
+.carousel-controls { justify-content: flex-end; }
+.carousel-controls > span:first-child { margin: -1px; }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .service .content-icon { transition: transform .2s ease; }
+  .service:hover .content-icon { transform: translateY(-3px); }
+}
+@media (max-width: 1100px) and (min-width: 761px) {
+  .header-inner { flex-wrap: wrap; justify-content: center; gap: 10px; padding-block: 12px; }
+  .header nav { flex-wrap: wrap; justify-content: center; }
+}
+@media (max-width: 760px) {
+  .header-inner { min-height: 76px; }
+  .header .menu-toggle { display: flex; align-items: center; gap: 12px; padding: 11px 15px; border: 1px solid #ffffff30; border-radius: 28px; background: #ffffff0d; color: white; font-size: 12px; }
+  .header nav { padding: 12px; margin-block: 5px 2px; background: #fff; border: 1px solid #e4e8ee; border-radius: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; box-shadow: 0 12px 30px #00152e20; }
+  .header nav > a { color: var(--petrol); font-size: 14px; border-radius: 10px; padding: 12px; }
+  .header nav > a:hover { background: #022e6809; color: var(--petrol); }
+  .header .nav-cta { grid-column: 1 / -1; margin: 4px 0 0; display: flex; justify-content: space-between; background: var(--gold); }
+  .carousel-controls { gap: 8px; margin-top: 4px; }
+  .carousel-controls button { width: 36px; height: 36px; font-size: 18px; border-color: #022e6830; }
+  .process .carousel-controls button { border-color: #edc77360; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .motion-enter { animation: gentle-enter .42s cubic-bezier(.2,.7,.3,1); }
+}
+@keyframes gentle-enter {
+  from { opacity: .65; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .motion-enter { animation: none; }
+}

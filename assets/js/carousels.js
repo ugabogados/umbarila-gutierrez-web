@@ -6,7 +6,8 @@
     const controls = document.createElement('div');
     controls.className = 'carousel-controls';
     const hint = document.createElement('span');
-    hint.textContent = 'Desliza para explorar';
+    hint.className = 'sr-only';
+    hint.textContent = track.dataset.carousel;
     const previous = document.createElement('button');
     const next = document.createElement('button');
     const status = document.createElement('span');
@@ -18,6 +19,7 @@
     previous.setAttribute('aria-controls', track.id);
     next.setAttribute('aria-controls', track.id);
     status.setAttribute('role', 'status');
+    status.className = 'sr-only';
     status.setAttribute('aria-live', 'polite');
     controls.append(hint, previous, status, next);
     track.after(controls);
