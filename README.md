@@ -43,4 +43,6 @@ La política PDF original, sin modificaciones, se encuentra en assets/documents/
 
 El menú móvil incluye panel de navegación y botón animado. Las entradas de contenido se animan una vez al aparecer, sin librerías y sin ocultar contenido si JavaScript falla. Se respeta prefers-reduced-motion. Los carruseles conservan solo flechas visibles; las instrucciones y el contador quedan disponibles para lectores de pantalla.
 
+En pantallas de hasta 760 px, la portada se reduce al mensaje principal, la solicitud de asesoría y las garantías. El bloque editorial del emblema se oculta porque repite la marca visible en el encabezado; permanece completo en escritorio. Las garantías se recorren horizontalmente y el encabezado, incluido su menú desplegable, usa el color #03263a.
+
 Referencias: https://developers.google.com/search/docs/appearance/structured-data/organization y https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap
