@@ -22,9 +22,9 @@ El build usa `SITE_URL` o `CF_PAGES_URL` para el sitemap. La compilación de pro
 
 `assets/js/config.js` centraliza el WhatsApp 573194532248, el correo umbarilagutierrez.asoc@gmail.com y los enlaces sociales. Instagram, Facebook y LinkedIn se muestran con sus iconos solo cuando la firma proporciona sus URLs HTTPS oficiales; no se inventan perfiles.
 
-El botón flotante indica que el visitante viene de la web. El formulario de asesoría prepara un mensaje con los datos y el consentimiento. La calificación de 1 a 5 estrellas y el comentario preparan otro mensaje privado. El visitante revisa y confirma el envío en WhatsApp; abrirlo no equivale a una recepción confirmada.
+El botón flotante indica que el visitante viene de la web. El formulario de asesoría prepara un mensaje con los datos y el consentimiento. El visitante revisa y confirma el envío en WhatsApp; abrirlo no equivale a una recepción confirmada.
 
-Los formularios no almacenan datos ni publican testimonios. No hay backend, analítica ni envío automático. Si la apertura es bloqueada, se ofrece un enlace para continuar. Sin JavaScript los formularios permanecen deshabilitados y los enlaces directos de contacto siguen disponibles.
+El formulario no almacena datos. No hay backend, analítica ni envío automático. Si la apertura es bloqueada, se ofrece un enlace para continuar. Sin JavaScript el formulario permanece deshabilitado y los enlaces directos de contacto siguen disponibles. La sección “Tu experiencia” muestra las dos capturas de testimonios proporcionadas por la firma.
 
 La representación requiere los acuerdos descritos en las preguntas frecuentes. Una futura recepción directa en la web requerirá implementar su servidor y mantener el vínculo con la política aprobada de la firma.
 

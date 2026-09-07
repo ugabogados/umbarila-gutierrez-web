@@ -88,22 +88,4 @@
       + "\n\nAutorizo el uso de estos datos para contactarme y atender mi solicitud.";
     handoff(text, status);
   });
-  const feedback = document.querySelector("#feedback-form");
-  document.querySelector("#feedback-fields").disabled = !validNumber;
-  const feedbackStatus = document.querySelector("#feedback-status");
-  feedback.querySelector("button").disabled = !validNumber;
-  feedback.addEventListener("change", (event) => {
-    if (event.target.name !== "rating") return;
-    const rating = Number(new FormData(feedback).get("rating"));
-    feedback.querySelectorAll(".rating input").forEach((input) => {
-      input.parentElement.classList.toggle("is-filled", Number(input.value) <= rating);
-    });
-    document.querySelector("#rating-status").textContent = rating + " de 5 estrellas";
-  });
-  feedback.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!validNumber || !feedback.reportValidity()) return;
-    const data = new FormData(feedback);
-    handoff(intro + " y quiero compartir mi experiencia.\n\nCalificación: " + data.get("rating") + "/5 estrellas\nComentario: " + data.get("feedback").trim(), feedbackStatus);
-  });
 })();

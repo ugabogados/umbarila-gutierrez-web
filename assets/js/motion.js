@@ -10,7 +10,7 @@
       target.addEventListener('animationend', () => target.classList.remove('motion-enter'), {once: true});
     });
   }, {threshold: .12});
-  document.querySelectorAll('.hero-copy, .hero-aside, .section-heading, .service, .principles > div, .steps > li, .feedback-form, .contact-form').forEach(el => observer.observe(el));
+  document.querySelectorAll('.hero-copy, .hero-aside, .section-heading, .service, .principles > div, .steps > li, .testimonial-card, .contact-form').forEach(el => observer.observe(el));
   reduced.addEventListener('change', () => {
     if (!reduced.matches) return;
     observer.disconnect();
