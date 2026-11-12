@@ -9,6 +9,12 @@ await mkdir(output, { recursive: true });
 for (const file of ["index.html", "assets", "portal", "robots.txt", "sitemap.xml"]) {
   await cp(path.join(root, file), path.join(output, file), { recursive: true });
 }
+// El visor público usa PDF.js para mostrar los documentos también en navegadores móviles.
+const pdfJsOutput = path.join(output, "vendor", "pdfjs");
+await mkdir(pdfJsOutput, { recursive: true });
+for (const file of ["pdf.min.mjs", "pdf.worker.min.mjs"]) {
+  await cp(path.join(root, "node_modules", "pdfjs-dist", "build", file), path.join(pdfJsOutput, file));
+}
 // La URL canónica nunca usa el subdominio temporal de un despliegue.
 const configuredUrl = process.env.SITE_URL || "https://ugabogados.com";
 const isPreview = process.env.SITE_PREVIEW === "true" ||

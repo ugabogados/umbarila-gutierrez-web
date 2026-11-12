@@ -27,7 +27,11 @@
       document.querySelector("#document-title").textContent = data.title || "Documento para firma";
       signerData = { name: data.clientName || "", identification: data.identification || "", email: data.email || "" };
       emailData = { to:data.emailTo || "", subject:data.emailSubject || "Documento firmado", body:data.emailBody || "Adjunto remito el documento debidamente firmado." };
-      document.querySelector("#review-document").href = `/api/sign/${encodeURIComponent(token)}/file`;
+      document.querySelector("#signer-name").textContent = signerData.name || "Cliente";
+      document.querySelector("#signer-identification").textContent = signerData.identification || "No registrado";
+      const documentUrl = `/api/sign/${encodeURIComponent(token)}/file`;
+      document.querySelector("#open-document").href = documentUrl;
+      renderDocumentPreview(documentUrl);
       prepareCanvas();
     } catch (error) {
       loading.hidden = true; unavailable.hidden = false;
@@ -42,6 +46,37 @@
     const move = event => { if(!drawing) return; event.preventDefault(); const p=point(event); context.lineTo(p.x,p.y); context.stroke(); };
     const stop = () => { drawing=false; };
     canvas.addEventListener("pointerdown", start); canvas.addEventListener("pointermove", move); window.addEventListener("pointerup", stop);
+  }
+
+  async function renderDocumentPreview(documentUrl) {
+    const container = document.querySelector("#document-preview");
+    try {
+      const pdfjs = await import("/vendor/pdfjs/pdf.min.mjs");
+      pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
+      const pdf = await pdfjs.getDocument(documentUrl).promise;
+      container.replaceChildren();
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const natural = page.getViewport({ scale: 1 });
+        const availableWidth = Math.min(container.clientWidth - 24, 850);
+        const scale = availableWidth / natural.width;
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        const display = page.getViewport({ scale });
+        const render = page.getViewport({ scale: scale * pixelRatio });
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.className = "pdf-page";
+        pageCanvas.setAttribute("aria-label", `Página ${pageNumber} de ${pdf.numPages}`);
+        pageCanvas.width = Math.floor(render.width);
+        pageCanvas.height = Math.floor(render.height);
+        pageCanvas.style.width = `${Math.floor(display.width)}px`;
+        pageCanvas.style.height = `${Math.floor(display.height)}px`;
+        container.append(pageCanvas);
+        await page.render({ canvasContext:pageCanvas.getContext("2d"), viewport:render }).promise;
+      }
+    } catch (error) {
+      console.error("No fue posible renderizar la vista previa del PDF.", error);
+      container.innerHTML = '<p class="preview-status">No fue posible cargar la vista previa. Usa “Abrir en pantalla completa”.</p>';
+    }
   }
 
   const clearSignature = () => { context.clearRect(0,0,canvas.width,canvas.height); hasSignature=false; };

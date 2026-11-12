@@ -6,8 +6,8 @@
     <meta name="robots" content="noindex,nofollow" />
     <meta name="theme-color" content="#011b36" />
     <title>Firma de documento | Umbarila Gutiérrez</title>
-    <link rel="stylesheet" href="/portal/firma.css?v=20261112-subtle-preview" />
-    <script src="/portal/firma.js?v=20261112-actions" defer></script>
+    <link rel="stylesheet" href="/portal/firma.css?v=20261112-pdf-preview" />
+    <script src="/portal/firma.js?v=20261112-pdf-preview-2" defer></script>
   </head>
   <body>
     <header><img src="/assets/images/simbolo-dorado.png" width="62" height="47" alt="" /><span>UMBARILA GUTIÉRREZ<small>&amp; ASOCIADOS</small></span></header>
@@ -16,14 +16,14 @@
       <section id="unavailable" class="message-card" hidden><h1>Enlace no disponible</h1><p id="unavailable-message">Solicita a la firma un nuevo enlace.</p></section>
       <section id="signed" class="message-card" hidden><p class="step">DOCUMENTO FIRMADO</p><h1>Tu firma quedó guardada.</h1><p>El documento ya forma parte del historial de la firma. Abriremos las opciones del dispositivo para enviarlo con el PDF adjunto.</p><div class="actions"><button id="prepare-email" class="primary email-action" type="button"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h17v11h-17z"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg><span>Enviar por correo con adjunto</span></button><a id="download-signed" class="secondary" target="_blank" rel="noopener">Previsualizar PDF firmado</a></div><p id="email-status" role="status" aria-live="polite"></p></section>
       <section id="signing" class="sign-card" hidden>
-        <div class="document-heading"><p class="step">DOCUMENTO PARA FIRMA</p><h1 id="document-title">Documento</h1></div>
+        <div class="document-heading"><p class="step">DOCUMENTO PARA FIRMA</p><h1 id="document-title">Documento</h1><div class="signer-summary" aria-label="Datos de la persona que firma"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c.7-4 2.9-6 6.5-6s5.8 2 6.5 6"/></svg><div><span>Estás firmando como</span><strong id="signer-name">Cliente</strong><small>Documento: <b id="signer-identification">—</b></small></div></div></div>
         <form id="sign-form">
-          <div class="signature-title"><h2>Firma dentro del recuadro</h2><span id="clear-signature" role="button" tabindex="0">Limpiar firma</span></div>
+          <div class="signature-title"><h2>Firma dentro del recuadro</h2><span id="clear-signature" role="button" tabindex="0">Reintentar firma</span></div>
           <div class="signature-wrap"><canvas id="signature" width="1200" height="700" aria-label="Área amplia para dibujar la firma"></canvas><span class="signature-line">FIRMA AQUÍ</span></div>
           <button class="primary submit" type="submit">Firmar documento</button>
-          <a id="review-document" class="secondary review-after-sign" target="_blank" rel="noopener">Previsualizar documento</a>
           <p id="sign-status" role="status" aria-live="polite"></p>
         </form>
+        <section class="document-preview-section" aria-labelledby="preview-title"><div class="preview-heading"><div><p class="step">DOCUMENTO</p><h2 id="preview-title">Revisa lo que estás firmando</h2></div><a id="open-document" target="_blank" rel="noopener">Abrir en pantalla completa</a></div><div id="document-preview" class="pdf-preview" aria-label="Vista previa del documento que se va a firmar"><p class="preview-status" role="status">Cargando vista previa…</p></div></section>
       </section>
     </main>
   </body>
