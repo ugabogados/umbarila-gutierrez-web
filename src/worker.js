@@ -308,6 +308,8 @@ async function buildTemplatePdf(env, title, content) {
   const pdf = await PDFDocument.create();
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const italic = await pdf.embedFont(StandardFonts.HelveticaOblique);
+  const boldItalic = await pdf.embedFont(StandardFonts.HelveticaBoldOblique);
   const navy = rgb(2 / 255, 46 / 255, 104 / 255);
   const ink = rgb(.12, .14, .17);
   const compact = /poder/i.test(title);
@@ -334,6 +336,37 @@ async function buildTemplatePdf(env, title, content) {
   };
   addPage();
 
+  if (looksLikeRichText(content)) {
+    const blocks = parseRichText(content);
+    const fontFor = (run, forceBold = false) => {
+      const strong = forceBold || run.bold;
+      return strong && run.italic ? boldItalic : strong ? bold : run.italic ? italic : regular;
+    };
+    for (const block of blocks) {
+      const heading = /^h[1-3]$/.test(block.tag);
+      const size = block.tag === "h1" ? 15 : block.tag === "h2" ? 13 : block.tag === "h3" ? 11.5 : (compact ? 9.1 : 9.7);
+      const lineHeight = heading ? size * 1.35 : (compact ? 11.7 : 13.5);
+      const lines = wrapRichRuns(block.runs, run => fontFor(run, heading), size, 452);
+      if (!lines.length) { y -= lineHeight; continue; }
+      if (y - lines.length * lineHeight < 76) addPage();
+      for (const line of lines) {
+        if (y - lineHeight < 76) addPage();
+        const lineWidth = line.reduce((total, segment) => total + segment.width, 0);
+        let x = 80;
+        if (block.align === "center") x += (452 - lineWidth) / 2;
+        if (block.align === "right") x += 452 - lineWidth;
+        for (const segment of line) {
+          page.drawText(segment.text, { x, y, size, font: segment.font, color: heading ? navy : ink });
+          if (segment.underline) page.drawLine({ start:{ x, y:y - 1.5 }, end:{ x:x + segment.width, y:y - 1.5 }, thickness:.65, color:heading ? navy : ink });
+          x += segment.width;
+        }
+        y -= lineHeight;
+      }
+      y -= heading ? 6 : 4;
+    }
+    return pdf.save();
+  }
+
   const paragraphs = String(content || "").replace(/\r/g, "").split("\n");
   for (const raw of paragraphs) {
     const text = raw.trim();
@@ -355,6 +388,87 @@ async function buildTemplatePdf(env, title, content) {
     y -= compact ? 2 : isHeading ? 5 : 4;
   }
   return pdf.save();
+}
+
+function looksLikeRichText(content) {
+  return /<(p|div|h[1-3]|ul|ol|li|strong|b|em|i|u|br)\b/i.test(String(content || ""));
+}
+
+function parseRichText(html) {
+  const source = String(html || "").replace(/<!--[\s\S]*?-->/g, "").replace(/<(script|style|iframe|object)\b[\s\S]*?<\/\1\s*>/gi, "");
+  const tokens = source.match(/<[^>]+>|[^<]+/g) || [];
+  const blocks = []; const style = { bold:0, italic:0, underline:0 }; const lists = [];
+  let current = null;
+  const finish = () => {
+    if (!current) return;
+    current.runs = current.runs.filter(run => run.text).map(run => ({ ...run, text:run.text.replace(/[ \t]+/g, " ") }));
+    if (current.runs.some(run => run.text.trim())) blocks.push(current);
+    current = null;
+  };
+  const start = (tag, rawTag = "") => {
+    finish();
+    const align = (/text-align\s*:\s*(left|center|right|justify)/i.exec(rawTag) || /align\s*=\s*["']?(left|center|right|justify)/i.exec(rawTag) || [])[1] || "left";
+    current = { tag, align:align.toLowerCase(), runs:[] };
+    if (tag === "li") {
+      const list = lists[lists.length - 1];
+      const prefix = list?.type === "ol" ? `${++list.count}. ` : "• ";
+      current.runs.push({ text:prefix, bold:true, italic:false, underline:false });
+    }
+  };
+  const addText = text => {
+    if (text === "\n") {
+      if (!current) start("p");
+      current.runs.push({ text:"\n", bold:style.bold > 0, italic:style.italic > 0, underline:style.underline > 0 });
+      return;
+    }
+    const decoded = decodeHtmlEntities(text).replace(/\r?\n/g, " ");
+    if (!decoded) return;
+    if (!current) start("p");
+    current.runs.push({ text:decoded, bold:style.bold > 0, italic:style.italic > 0, underline:style.underline > 0 });
+  };
+  for (const token of tokens) {
+    if (!token.startsWith("<")) { addText(token); continue; }
+    const closing = /^<\s*\//.test(token); const name = (token.match(/^<\s*\/?\s*([a-z0-9]+)/i) || [])[1]?.toLowerCase();
+    if (!name) continue;
+    if (!closing && ["p","div","h1","h2","h3","li"].includes(name)) start(name, token);
+    else if (closing && ["p","div","h1","h2","h3","li"].includes(name)) finish();
+    else if (!closing && (name === "ul" || name === "ol")) { finish(); lists.push({ type:name, count:0 }); }
+    else if (closing && (name === "ul" || name === "ol")) { finish(); lists.pop(); }
+    else if (name === "br" && !closing) addText("\n");
+    else if (["strong","b"].includes(name)) style.bold = Math.max(0, style.bold + (closing ? -1 : 1));
+    else if (["em","i"].includes(name)) style.italic = Math.max(0, style.italic + (closing ? -1 : 1));
+    else if (name === "u") style.underline = Math.max(0, style.underline + (closing ? -1 : 1));
+  }
+  finish();
+  return blocks;
+}
+
+function decodeHtmlEntities(text) {
+  const named = { amp:"&", lt:"<", gt:">", quot:'"', apos:"'", "#39":"'", nbsp:" " };
+  return String(text).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (_, entity) => {
+    const key = entity.toLowerCase();
+    if (key.startsWith("#x")) return String.fromCodePoint(parseInt(key.slice(2), 16));
+    if (key.startsWith("#")) return String.fromCodePoint(parseInt(key.slice(1), 10));
+    return named[key] ?? `&${entity};`;
+  });
+}
+
+function wrapRichRuns(runs, fontFor, size, width) {
+  const lines = []; let line = []; let lineWidth = 0; let pendingSpace = false;
+  const pushLine = () => { if (line.length) lines.push(line); line = []; lineWidth = 0; pendingSpace = false; };
+  for (const run of runs) {
+    const font = fontFor(run);
+    for (const token of run.text.split(/(\n|\s+)/)) {
+      if (!token) continue;
+      if (token === "\n") { pushLine(); continue; }
+      if (/^\s+$/.test(token)) { pendingSpace = line.length > 0; continue; }
+      const prefix = pendingSpace && line.length ? " " : "";
+      let value = prefix + token; let tokenWidth = font.widthOfTextAtSize(value, size);
+      if (line.length && lineWidth + tokenWidth > width) { pushLine(); value = token; tokenWidth = font.widthOfTextAtSize(value, size); }
+      line.push({ text:value, width:tokenWidth, font, underline:run.underline }); lineWidth += tokenWidth; pendingSpace = false;
+    }
+  }
+  pushLine(); return lines;
 }
 
 function wrapPdfText(text, font, size, width) {

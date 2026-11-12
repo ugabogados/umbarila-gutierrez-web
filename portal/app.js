@@ -146,7 +146,9 @@
     form.elements.templateId.value = selected.id;
     form.elements.name.value = selected.name;
     form.elements.description.value = selected.description || "";
-    form.elements.content.value = selected.content;
+    const editor = document.querySelector("#template-rich-editor");
+    editor.innerHTML = sanitizeTemplateHtml(looksLikeHtml(selected.content) ? selected.content : plainToEditorHtml(selected.content));
+    syncRichEditor();
     renderTemplateVariableList();
   }
 
@@ -217,6 +219,7 @@
 
   document.querySelector("#template-editor").addEventListener("submit", async event => {
     event.preventDefault();
+    syncRichEditor();
     const data = Object.fromEntries(new FormData(event.currentTarget));
     data.action = "template.update";
     try {
@@ -225,19 +228,29 @@
     } catch (error) { setStatus(globalStatus, error.message); }
   });
 
-  document.querySelector("#template-editor textarea[name=content]").addEventListener("input", renderTemplateVariableList);
+  const richEditor = document.querySelector("#template-rich-editor");
+  richEditor.addEventListener("input", syncRichEditor);
+  document.querySelector(".rich-toolbar").addEventListener("mousedown", event => event.preventDefault());
+  document.querySelector(".rich-toolbar").addEventListener("click", event => {
+    const command = event.target.closest("[data-rich-command]")?.dataset.richCommand;
+    const block = event.target.closest("[data-rich-block]")?.dataset.richBlock;
+    if (!command && !block) return;
+    richEditor.focus();
+    document.execCommand(block ? "formatBlock" : command, false, block ? `<${block}>` : null);
+    syncRichEditor();
+  });
   document.querySelector("#insert-template-variable").addEventListener("click", () => {
     const input = document.querySelector("#template-variable-name");
     const key = variableKey(input.value);
     if (!key) return;
-    const textarea = document.querySelector("#template-editor textarea[name=content]");
-    const token = `{{${key}}}`; const start = textarea.selectionStart; const end = textarea.selectionEnd;
-    textarea.setRangeText(token, start, end, "end");
-    textarea.focus(); input.value = ""; renderTemplateVariableList();
+    richEditor.focus();
+    if (!document.execCommand("insertText", false, `{{${key}}}`)) richEditor.append(document.createTextNode(`{{${key}}}`));
+    input.value = ""; syncRichEditor();
   });
 
   document.querySelector("#preview-template").addEventListener("click", () => {
     const form = document.querySelector("#template-editor");
+    syncRichEditor();
     previewPdf({ templateId: form.elements.templateId.value, name: form.elements.name.value, content: form.elements.content.value, clientId: document.querySelector("#template-preview-client").value });
   });
 
@@ -267,9 +280,40 @@
   }
 
   function renderTemplateVariableList() {
-    const content = document.querySelector("#template-editor textarea[name=content]").value;
+    const content = document.querySelector("#template-rich-editor").textContent;
     const variables = extractVariables(content);
     document.querySelector("#template-variable-list").innerHTML = variables.length ? variables.map(key => `<code>{{${esc(key)}}}</code>`).join("") : `<span>Esta plantilla aún no contiene variables.</span>`;
+  }
+
+  function syncRichEditor() {
+    const editor = document.querySelector("#template-rich-editor");
+    const content = sanitizeTemplateHtml(editor.innerHTML);
+    document.querySelector("#template-editor textarea[name=content]").value = content;
+    renderTemplateVariableList();
+  }
+
+  function looksLikeHtml(content) { return /<(p|div|h[1-3]|ul|ol|li|strong|b|em|i|u|br)\b/i.test(String(content || "")); }
+
+  function plainToEditorHtml(content) {
+    return String(content || "").replace(/\r/g, "").split(/\n{2,}/).map(block => `<p>${esc(block).replace(/\n/g, "<br>")}</p>`).join("");
+  }
+
+  function sanitizeTemplateHtml(html) {
+    const holder = document.createElement("template"); holder.innerHTML = String(html || "");
+    const allowed = new Set(["P","DIV","H1","H2","H3","STRONG","B","EM","I","U","UL","OL","LI","BR"]);
+    const cleanNode = node => {
+      [...node.childNodes].forEach(child => {
+        if (child.nodeType !== Node.ELEMENT_NODE) return;
+        if (["SCRIPT","STYLE","IFRAME","OBJECT"].includes(child.tagName)) { child.remove(); return; }
+        cleanNode(child);
+        if (!allowed.has(child.tagName)) { child.replaceWith(...child.childNodes); return; }
+        const alignment = (child.style.textAlign || child.getAttribute("align") || "").toLowerCase();
+        [...child.attributes].forEach(attribute => child.removeAttribute(attribute.name));
+        if (["left","center","right","justify"].includes(alignment)) child.style.textAlign = alignment;
+      });
+    };
+    cleanNode(holder.content);
+    return holder.innerHTML;
   }
 
   function documentFormData(form) {
