@@ -323,7 +323,11 @@ async function signingApi(request, env, token, suffix) {
     return json({ error: "Completa tus datos, firma y aceptación." }, 400);
   }
   if (body.signature.length > 1500000) return json({ error: "La firma es demasiado grande." }, 413);
-  const original = await getFile(env, doc.unsigned_key); const originalBytes = original.data;
+  const original = await getFile(env, doc.unsigned_key); let originalBytes = new Uint8Array(original.data);
+  try {
+    const existingPdf = await PDFDocument.load(originalBytes); const hasLayoutMarker = /^UG_CONTENT_BOTTOM:/.test(existingPdf.getSubject() || "");
+    if (!hasLayoutMarker && doc.content_snapshot) originalBytes = await buildTemplatePdf(env, doc.template_name || doc.title, doc.content_snapshot, doc.background_key_snapshot);
+  } catch {}
   const signedAt = new Date().toISOString();
   const signedPdf = await addSignature(env, new Uint8Array(originalBytes), body.signature, { name: clean(body.signerName, 140), identification: clean(body.signerIdentification, 40), email: normalizeOptionalEmail(body.signerEmail), signedAt }, doc.background_key_snapshot);
   const signedKey = `documents/${doc.id}/signed.pdf`; const pdfHash = await sha256Bytes(signedPdf);
