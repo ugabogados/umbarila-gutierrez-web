@@ -2,7 +2,9 @@
   const state = { user: null, clients: [], stages: [], cases: [], documents: [], documentLinks: [], templates: [], users: [] };
   let activeTemplateId = null;
   let documentPage = 1;
+  let casePage = 1;
   const DOCUMENT_PAGE_SIZE = 12;
+  const CASE_PAGE_SIZE = 15;
   const AUTOMATIC_VARIABLES = new Set(["cliente_nombre","cliente_identificacion","cliente_correo","cliente_telefono","caso_titulo","caso_referencia","caso_descripcion","fecha_larga"]);
   const authScreen = document.querySelector("#auth-screen");
   const app = document.querySelector("#portal-app");
@@ -60,7 +62,7 @@
     document.querySelector("#sidebar-name").textContent = state.user.name;
     document.querySelector("#sidebar-email").textContent = state.user.email;
     document.querySelectorAll(".admin-only").forEach(el => el.hidden = state.user.role !== "admin");
-    renderMetrics(); renderCases(); renderPipeline(); renderClients(); renderDocuments(); renderTemplates(); renderSettings(); fillSelects();
+    renderMetrics(); renderCases(); renderCaseList(); renderPipeline(); renderClients(); renderDocuments(); renderTemplates(); renderSettings(); fillSelects();
   }
 
   function renderMetrics() {
@@ -71,6 +73,23 @@
 
   function renderCases() {
     document.querySelector("#recent-cases").innerHTML = state.cases.slice(0,8).map(item => `<article class="list-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.client_name)} · ${esc(item.stage_name)}</small></div><span class="badge">${esc(item.reference || "Sin referencia")}</span></article>`).join("") || empty("Aún no hay casos registrados.");
+  }
+
+  function renderCaseList() {
+    const search = document.querySelector("#case-search").value.trim().toLowerCase();
+    const stageId = document.querySelector("#case-stage-filter").value;
+    const filtered = state.cases.filter(item => {
+      const haystack = `${item.title} ${item.client_name} ${item.reference || ""} ${item.description || ""}`.toLowerCase();
+      return (!search || haystack.includes(search)) && (!stageId || item.stage_id === stageId);
+    });
+    const pages = Math.max(1, Math.ceil(filtered.length / CASE_PAGE_SIZE));
+    casePage = Math.min(casePage, pages);
+    const visible = filtered.slice((casePage - 1) * CASE_PAGE_SIZE, casePage * CASE_PAGE_SIZE);
+    document.querySelector("#case-count").textContent = `${filtered.length} caso${filtered.length === 1 ? "" : "s"}`;
+    document.querySelector("#cases-page").textContent = `Página ${casePage} de ${pages}`;
+    document.querySelector("#cases-prev").disabled = casePage <= 1;
+    document.querySelector("#cases-next").disabled = casePage >= pages;
+    document.querySelector("#cases-list").innerHTML = visible.map(item => `<article class="case-list-row"><div class="case-list-main"><strong>${esc(item.title)}</strong><small>${esc(item.client_name)}</small></div><span class="case-reference">${esc(item.reference || "Sin referencia")}</span><span class="badge" style="border-left:3px solid ${esc(state.stages.find(stage => stage.id === item.stage_id)?.color || "#edc773")}">${esc(item.stage_name)}</span><time>${esc(formatDate(item.updated_at))}</time></article>`).join("") || empty("No se encontraron casos.");
   }
 
   function renderPipeline() {
@@ -141,6 +160,8 @@
     const stageOptions = state.stages.map(item => `<option value="${item.id}">${esc(item.name)}</option>`).join("");
     document.querySelector("#case-client").innerHTML = clientOptions;
     document.querySelector("#case-stage").innerHTML = stageOptions;
+    const stageFilter = document.querySelector("#case-stage-filter"); const selectedStage = stageFilter.value;
+    stageFilter.innerHTML = `<option value="">Todas</option>` + stageOptions; stageFilter.value = selectedStage;
     document.querySelector("#document-client").innerHTML = clientOptions;
     document.querySelector("#template-preview-client").innerHTML = `<option value="">Datos de ejemplo</option>` + state.clients.map(item => `<option value="${item.id}">${esc(item.full_name)}</option>`).join("");
     document.querySelector("#document-template").innerHTML = (state.templates || []).map(item => `<option value="${item.id}">${esc(item.name)}</option>`).join("");
@@ -288,6 +309,10 @@
   document.querySelector("#document-status-filter").addEventListener("change", () => { documentPage = 1; renderDocuments(); });
   document.querySelector("#documents-prev").addEventListener("click", () => { if (documentPage > 1) { documentPage--; renderDocuments(); } });
   document.querySelector("#documents-next").addEventListener("click", () => { documentPage++; renderDocuments(); });
+  document.querySelector("#case-search").addEventListener("input", () => { casePage = 1; renderCaseList(); });
+  document.querySelector("#case-stage-filter").addEventListener("change", () => { casePage = 1; renderCaseList(); });
+  document.querySelector("#cases-prev").addEventListener("click", () => { if (casePage > 1) { casePage--; renderCaseList(); } });
+  document.querySelector("#cases-next").addEventListener("click", () => { casePage++; renderCaseList(); });
 
   document.querySelector("#documents-list").addEventListener("click", async event => {
     const remove = event.target.closest("[data-delete-document]");
