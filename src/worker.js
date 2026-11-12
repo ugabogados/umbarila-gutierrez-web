@@ -616,8 +616,9 @@ async function addSignature(env, original, signatureDataUrl, signer, backgroundK
   detailY = drawWrapped(page, signer.name, detailX, detailY, usableWidth - 215, 9.5, bold, navy, 11); detailY -= 3;
   page.drawText(`Identificación: ${signer.identification}`, { x:detailX, y:detailY, size:8.5, font:regular, color:ink }); detailY -= 13;
   detailY = drawWrapped(page, `Correo: ${signer.email || "No indicado"}`, detailX, detailY, usableWidth - 215, 8.5, regular, ink, 10.5); detailY -= 2;
-  const signedDate = new Intl.DateTimeFormat("es-CO", { dateStyle:"medium", timeStyle:"short", timeZone:"America/Bogota" }).format(new Date(signer.signedAt));
-  page.drawText(`Fecha de firma: ${signedDate}`, { x:detailX, y:detailY, size:8.2, font:regular, color:ink });
+  const signedUtc = new Date(signer.signedAt).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+  page.drawText(`Fecha y hora UTC: ${signedUtc}`, { x:detailX, y:detailY, size:8.2, font:regular, color:ink });
+  pdf.setModificationDate(new Date(signer.signedAt));
   pdf.setSubject("Documento firmado electrónicamente por Umbarila Gutiérrez & Asociados");
   return pdf.save();
 }
