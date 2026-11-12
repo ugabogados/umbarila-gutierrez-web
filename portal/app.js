@@ -138,17 +138,21 @@
 
   function renderTemplates() {
     const templates = state.templates || [];
+    const form = document.querySelector("#template-editor");
     if (!templates.length) {
       document.querySelector("#templates-list").innerHTML = empty("No hay plantillas disponibles.");
+      activeTemplateId = null;
+      form.hidden = true;
+      if (livePreviewAbort) livePreviewAbort.abort();
       return;
     }
+    form.hidden = false;
     if (!templates.some(item => item.id === activeTemplateId)) activeTemplateId = templates[0].id;
     document.querySelector("#templates-list").innerHTML = templates.map(item => `
       <button class="template-option ${item.id === activeTemplateId ? "active" : ""}" type="button" data-template-id="${item.id}">
         <strong>${esc(item.name)}</strong><span>${esc(item.description || "Plantilla editable")}</span>
       </button>`).join("");
     const selected = templates.find(item => item.id === activeTemplateId);
-    const form = document.querySelector("#template-editor");
     form.elements.templateId.value = selected.id;
     form.elements.name.value = selected.name;
     form.elements.description.value = selected.description || "";
@@ -240,6 +244,19 @@
       await api("/api/portal/actions", { method:"POST", body:JSON.stringify(data) });
       await refresh("Plantilla guardada correctamente.");
     } catch (error) { setStatus(globalStatus, error.message); }
+  });
+
+  document.querySelector("#delete-template").addEventListener("click", async event => {
+    const template = state.templates.find(item => item.id === activeTemplateId);
+    if (!template) return;
+    const confirmed = confirm(`¿Eliminar la plantilla "${template.name}"?\n\nDejará de estar disponible para crear documentos nuevos. Los documentos que ya fueron generados se conservarán intactos.`);
+    if (!confirmed) return;
+    event.currentTarget.disabled = true;
+    try {
+      await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"template.delete", templateId:template.id }) });
+      activeTemplateId = null;
+      await refresh("Plantilla eliminada. Los documentos existentes se conservaron.");
+    } catch (error) { event.currentTarget.disabled = false; setStatus(globalStatus, error.message); }
   });
 
   document.querySelector("#template-background-file").addEventListener("change", async event => {

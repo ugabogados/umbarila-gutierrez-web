@@ -189,6 +189,13 @@ async function actions(request, env, user) {
     await audit(env, null, user.id, "template.created", `Plantilla creada: ${name}`);
     return json({ ok: true, id }, 201);
   }
+  if (body.action === "template.delete") {
+    const template = await env.PORTAL_DB.prepare("SELECT id,name FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
+    if (!template) return json({ error: "No se encontró la plantilla." }, 404);
+    await env.PORTAL_DB.prepare("UPDATE portal_templates SET active=0,updated_at=?,updated_by=? WHERE id=?").bind(now, user.id, template.id).run();
+    await audit(env, null, user.id, "template.deleted", `Plantilla retirada: ${template.name}. Los documentos creados se conservaron.`);
+    return json({ ok: true });
+  }
   if (body.action === "template.background.update") {
     const template = await env.PORTAL_DB.prepare("SELECT id FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
     if (!template) return json({ error: "No se encontró la plantilla." }, 404);

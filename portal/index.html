@@ -7,8 +7,8 @@
     <meta name="theme-color" content="#011b36" />
     <title>Portal interno | Umbarila Gutiérrez</title>
     <link rel="icon" href="/assets/images/simbolo-dorado.png" type="image/png" />
-    <link rel="stylesheet" href="/portal/app.css?v=20261112-editor-formatting-v2" />
-    <script src="/portal/app.js?v=20261112-editor-formatting-v2" defer></script>
+    <link rel="stylesheet" href="/portal/app.css?v=20261112-template-delete-v1" />
+    <script src="/portal/app.js?v=20261112-template-delete-v1" defer></script>
   </head>
   <body>
     <div id="auth-screen" class="auth-shell" hidden>
@@ -98,7 +98,7 @@
             </aside>
             <form id="template-editor" class="panel template-editor">
               <input name="templateId" type="hidden" />
-              <div class="panel-heading"><div><p class="kicker">EDITOR</p><h2>Editar plantilla</h2></div><button class="primary" type="submit">Guardar cambios</button></div>
+              <div class="panel-heading"><div><p class="kicker">EDITOR</p><h2>Editar plantilla</h2></div><div class="template-editor-actions"><button id="delete-template" class="danger-button" type="button">Eliminar plantilla</button><button class="primary" type="submit">Guardar cambios</button></div></div>
               <label>Nombre de la plantilla<input name="name" required maxlength="160" /></label>
               <label>Descripción<input name="description" maxlength="500" /></label>
               <section class="template-background-editor" aria-labelledby="template-background-title">
