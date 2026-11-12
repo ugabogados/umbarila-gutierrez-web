@@ -1,5 +1,6 @@
 (() => {
-  const state = { user: null, clients: [], stages: [], cases: [], documents: [], users: [] };
+  const state = { user: null, clients: [], stages: [], cases: [], documents: [], templates: [], users: [] };
+  let activeTemplateId = null;
   const authScreen = document.querySelector("#auth-screen");
   const app = document.querySelector("#portal-app");
   const authStatus = document.querySelector("#auth-status");
@@ -56,7 +57,7 @@
     document.querySelector("#sidebar-name").textContent = state.user.name;
     document.querySelector("#sidebar-email").textContent = state.user.email;
     document.querySelectorAll(".admin-only").forEach(el => el.hidden = state.user.role !== "admin");
-    renderMetrics(); renderCases(); renderPipeline(); renderClients(); renderDocuments(); renderSettings(); fillSelects();
+    renderMetrics(); renderCases(); renderPipeline(); renderClients(); renderDocuments(); renderTemplates(); renderSettings(); fillSelects();
   }
 
   function renderMetrics() {
@@ -88,6 +89,25 @@
     }).join("") || empty("Aún no se han generado documentos.");
   }
 
+  function renderTemplates() {
+    const templates = state.templates || [];
+    if (!templates.length) {
+      document.querySelector("#templates-list").innerHTML = empty("No hay plantillas disponibles.");
+      return;
+    }
+    if (!templates.some(item => item.id === activeTemplateId)) activeTemplateId = templates[0].id;
+    document.querySelector("#templates-list").innerHTML = templates.map(item => `
+      <button class="template-option ${item.id === activeTemplateId ? "active" : ""}" type="button" data-template-id="${item.id}">
+        <strong>${esc(item.name)}</strong><span>${esc(item.description || "Plantilla editable")}</span>
+      </button>`).join("");
+    const selected = templates.find(item => item.id === activeTemplateId);
+    const form = document.querySelector("#template-editor");
+    form.elements.templateId.value = selected.id;
+    form.elements.name.value = selected.name;
+    form.elements.description.value = selected.description || "";
+    form.elements.content.value = selected.content;
+  }
+
   function renderSettings() {
     document.querySelector("#users-list").innerHTML = state.users.map(item => `<article class="list-row"><div><strong>${esc(item.name)}</strong><small>${esc(item.email)}</small></div><span class="badge">${item.role === "admin" ? "Administrador" : "Equipo"}</span></article>`).join("") || empty("No hay usuarios adicionales.");
     document.querySelector("#stages-list").innerHTML = state.stages.map(item => `<article class="list-row"><div><strong>${esc(item.name)}</strong><small>Posición ${item.position}</small></div><span style="width:18px;height:18px;border-radius:50%;background:${esc(item.color)}"></span></article>`).join("");
@@ -99,6 +119,8 @@
     document.querySelector("#case-client").innerHTML = clientOptions;
     document.querySelector("#case-stage").innerHTML = stageOptions;
     document.querySelector("#document-client").innerHTML = clientOptions;
+    document.querySelector("#template-preview-client").innerHTML = `<option value="">Datos de ejemplo</option>` + state.clients.map(item => `<option value="${item.id}">${esc(item.full_name)}</option>`).join("");
+    document.querySelector("#document-template").innerHTML = (state.templates || []).map(item => `<option value="${item.id}">${esc(item.name)}</option>`).join("");
     updateDocumentCases();
   }
 
@@ -132,6 +154,32 @@
 
   document.querySelector("#document-client").addEventListener("change", updateDocumentCases);
 
+  document.querySelector("#templates-list").addEventListener("click", event => {
+    const option = event.target.closest("[data-template-id]");
+    if (!option) return;
+    activeTemplateId = option.dataset.templateId;
+    renderTemplates();
+  });
+
+  document.querySelector("#template-editor").addEventListener("submit", async event => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    data.action = "template.update";
+    try {
+      await api("/api/portal/actions", { method:"POST", body:JSON.stringify(data) });
+      await refresh("Plantilla guardada correctamente.");
+    } catch (error) { setStatus(globalStatus, error.message); }
+  });
+
+  document.querySelector("#preview-template").addEventListener("click", () => {
+    const form = document.querySelector("#template-editor");
+    previewPdf({ templateId: form.elements.templateId.value, name: form.elements.name.value, content: form.elements.content.value, clientId: document.querySelector("#template-preview-client").value });
+  });
+
+  document.querySelector("#preview-document").addEventListener("click", () => {
+    previewPdf({ templateId: document.querySelector("#document-template").value, clientId: document.querySelector("#document-client").value, caseId: document.querySelector("#document-case").value });
+  });
+
   function updateDocumentCases() {
     const clientId = document.querySelector("#document-client").value;
     const options = state.cases.filter(item => !clientId || item.client_id === clientId);
@@ -159,6 +207,23 @@
     const text = `Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${url}`;
     try { await navigator.clipboard.writeText(url); } catch {}
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  }
+  async function previewPdf(payload) {
+    const preview = window.open("", "_blank");
+    if (preview) preview.document.write("<title>Generando vista previa…</title><p style='font:16px Arial;padding:24px'>Generando vista previa…</p>");
+    try {
+      const response = await fetch("/api/portal/preview", { method:"POST", headers:{ "content-type":"application/json" }, credentials:"same-origin", body:JSON.stringify(payload) });
+      if (!response.ok) {
+        const data = (response.headers.get("content-type") || "").includes("json") ? await response.json() : null;
+        throw new Error(data?.error || "No fue posible generar la vista previa.");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      if (preview) preview.location.href = url; else location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (error) {
+      if (preview) preview.close();
+      setStatus(globalStatus, error.message);
+    }
   }
   function setStatus(element, message, success=false) { element.textContent=message; element.classList.toggle("success", success); if (message) setTimeout(()=>{ if(element.textContent===message) element.textContent=""; },5000); }
   function empty(message) { return `<p class="muted">${esc(message)}</p>`; }

@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { DEFAULT_TEMPLATES } from "./templates.js";
 
 const SESSION_COOKIE = "ug_portal_session";
 const SESSION_DAYS = 14;
@@ -42,6 +43,7 @@ async function handleApi(request, env, url) {
   const user = await requireUser(request, env);
   if (!user) return json({ error: "Debes iniciar sesión." }, 401);
   if (url.pathname === "/api/portal/snapshot" && request.method === "GET") return snapshot(env, user);
+  if (url.pathname === "/api/portal/preview" && request.method === "POST") return previewDocument(request, env);
   if (url.pathname === "/api/portal/actions" && request.method === "POST") return actions(request, env, user);
 
   const fileMatch = url.pathname.match(/^\/api\/portal\/documents\/([^/]+)\/file$/);
@@ -108,14 +110,16 @@ async function requireUser(request, env) { return currentUser(request, env); }
 function publicUser(user) { return { id: user.id, email: user.email, name: user.name, role: user.role }; }
 
 async function snapshot(env, user) {
-  const [clients, stages, cases, documents, users] = await Promise.all([
+  await ensureTemplates(env);
+  const [clients, stages, cases, documents, users, templates] = await Promise.all([
     env.PORTAL_DB.prepare("SELECT * FROM portal_clients ORDER BY updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT * FROM portal_stages WHERE active=1 ORDER BY position").all(),
     env.PORTAL_DB.prepare("SELECT c.*,cl.full_name AS client_name,s.name AS stage_name FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id JOIN portal_stages s ON s.id=c.stage_id ORDER BY c.updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT d.*,cl.full_name AS client_name,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id ORDER BY d.updated_at DESC").all(),
     user.role === "admin" ? env.PORTAL_DB.prepare("SELECT id,email,name,role,active,created_at FROM portal_users ORDER BY name").all() : Promise.resolve({ results: [] }),
+    env.PORTAL_DB.prepare("SELECT id,name,description,content,active,updated_at FROM portal_templates WHERE active=1 ORDER BY name").all(),
   ]);
-  return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, users: users.results });
+  return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, users: users.results, templates: templates.results });
 }
 
 async function actions(request, env, user) {
@@ -161,31 +165,62 @@ async function actions(request, env, user) {
       .bind(id, normalizeEmail(body.email), clean(body.name, 120), body.role === "admin" ? "admin" : "staff", await hashPassword(body.password, salt), salt, now, now).run();
     return json({ ok: true, id }, 201);
   }
+  if (body.action === "template.update") {
+    const name = clean(body.name, 160); const content = String(body.content || "").trim();
+    if (!name || content.length < 40) return json({ error: "La plantilla necesita un nombre y contenido válido." }, 400);
+    const result = await env.PORTAL_DB.prepare("UPDATE portal_templates SET name=?,description=?,content=?,updated_at=?,updated_by=? WHERE id=? AND active=1")
+      .bind(name, clean(body.description, 500), content.slice(0, 100000), now, user.id, body.templateId).run();
+    if (!result.meta.changes) return json({ error: "No se encontró la plantilla." }, 404);
+    await audit(env, null, user.id, "template.updated", `Plantilla actualizada: ${name}`);
+    return json({ ok: true });
+  }
   if (body.action === "document.create") return createDocument(env, user, body);
   return json({ error: "Acción desconocida." }, 400);
 }
 
 async function createDocument(env, user, body) {
-  let record;
-  let caseId = clean(body.caseId, 80) || null;
-  if (caseId) {
-    record = await env.PORTAL_DB.prepare("SELECT c.id AS case_id,c.title,c.reference,cl.id AS client_id,cl.full_name,cl.identification,cl.email FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id WHERE c.id=?")
-      .bind(caseId).first();
-    if (!record) return json({ error: "No se encontró el caso seleccionado." }, 404);
-  } else {
-    record = await env.PORTAL_DB.prepare("SELECT id AS client_id,full_name,identification,email,NULL AS case_id,NULL AS title,NULL AS reference FROM portal_clients WHERE id=?")
-      .bind(body.clientId).first();
-    if (!record) return json({ error: "Selecciona un cliente para generar el documento." }, 400);
-  }
+  await ensureTemplates(env);
+  const context = await documentContext(env, body);
+  if (context.error) return json({ error: context.error }, context.status);
+  const { record, template } = context;
   const id = crypto.randomUUID(); const token = randomToken(32); const now = new Date();
-  const pdf = await buildInstructionPdf(record);
+  const renderedContent = renderTemplate(template.content, record);
+  const pdf = await buildTemplatePdf(env, template.name, renderedContent);
   const unsignedKey = `documents/${id}/original.pdf`;
   await putFile(env, unsignedKey, pdf, "application/pdf");
-  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, record.case_id, record.client_id, "Instrucciones para otorgar poder — Ley 2213 de 2022", "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString()).run();
+  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
   const base = String(env.PUBLIC_ORIGIN || new URL(body.origin || "https://ugabogados.com").origin).replace(/\/$/, "");
   return json({ ok: true, id, signingUrl: `${base}/firmar/${token}` }, 201);
+}
+
+async function previewDocument(request, env) {
+  await ensureTemplates(env);
+  const body = await readJson(request);
+  const context = await documentContext(env, body, true);
+  if (context.error) return json({ error: context.error }, context.status);
+  const content = body.content ? String(body.content).slice(0, 100000) : context.template.content;
+  const name = clean(body.name, 160) || context.template.name;
+  const pdf = await buildTemplatePdf(env, name, renderTemplate(content, context.record));
+  return new Response(pdf, { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename=\"${safeFilename(name)}.pdf\"`, "cache-control": "no-store" } });
+}
+
+async function documentContext(env, body, allowSample = false) {
+  const template = await env.PORTAL_DB.prepare("SELECT id,name,description,content FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
+  if (!template) return { error: "Selecciona una plantilla.", status: 400 };
+  const caseId = clean(body.caseId, 80) || null;
+  let record;
+  if (caseId) {
+    record = await env.PORTAL_DB.prepare("SELECT c.id AS case_id,c.title,c.reference,c.description,cl.id AS client_id,cl.full_name,cl.identification,cl.email,cl.phone FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id WHERE c.id=?").bind(caseId).first();
+    if (!record) return { error: "No se encontró el caso seleccionado.", status: 404 };
+  } else if (body.clientId) {
+    record = await env.PORTAL_DB.prepare("SELECT id AS client_id,full_name,identification,email,phone,NULL AS case_id,NULL AS title,NULL AS reference,NULL AS description FROM portal_clients WHERE id=?").bind(body.clientId).first();
+    if (!record) return { error: "Selecciona un cliente.", status: 400 };
+  } else if (allowSample) {
+    record = { client_id: null, full_name: "NOMBRE DEL CLIENTE", identification: "NÚMERO DE IDENTIFICACIÓN", email: "correo@ejemplo.com", phone: "300 000 0000", case_id: null, title: "ASUNTO JURÍDICO", reference: "REFERENCIA DEL PROCESO", description: "DESCRIPCIÓN DEL OBJETO O ACTUACIÓN JURÍDICA" };
+  } else return { error: "Selecciona un cliente para generar el documento.", status: 400 };
+  return { record, template };
 }
 
 async function internalDocument(env, id) {
@@ -225,27 +260,83 @@ async function signingApi(request, env, token, suffix) {
   return json({ ok: true, signedAt });
 }
 
-async function buildInstructionPdf(record) {
-  const pdf = await PDFDocument.create(); const page = pdf.addPage([595.28, 841.89]);
-  const regular = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const navy = rgb(1 / 255, 27 / 255, 54 / 255); const gold = rgb(237 / 255, 199 / 255, 115 / 255);
-  page.drawRectangle({ x: 0, y: 775, width: 595.28, height: 67, color: navy });
-  page.drawText("UMBARILA GUTIÉRREZ & ASOCIADOS", { x: 42, y: 805, size: 15, font: bold, color: gold });
-  let y = 742;
-  y = drawWrapped(page, "INSTRUCCIONES PARA OTORGAR PODER", 42, y, 511, 17, bold, navy, 23);
-  y = drawWrapped(page, `Cliente: ${record.full_name}${record.identification ? ` · C.C. ${record.identification}` : ""}`, 42, y - 5, 511, 10, regular, rgb(.2,.2,.2), 15);
-  const paragraphs = [
-    "Todos los documentos deben ir firmados. No se requiere autenticación en notaría, de conformidad con la Ley 2213 de 2022.",
-    "Para otorgar poder, envía desde tu correo personal todos los documentos firmados y una copia de tu cédula de ciudadanía a umbarilagutierrez.asoc@gmail.com.",
-    "ASUNTO: PODER ESPECIAL - LEY 2213 DE 2022.",
-    "En el cuerpo del correo indica: En cumplimiento de lo dispuesto en la Ley 2213 del 13 de junio de 2022, y de conformidad con lo establecido en su artículo 5.º, por medio del presente escrito confiero poder especial, amplio y suficiente a los abogados relacionados en el documento adjunto, para que, en mi nombre y representación, promuevan, adelanten y lleven hasta su culminación el medio de control de nulidad y restablecimiento del derecho en contra de la Subred Integrada de Servicios de Salud Sur Occidente E.S.E., con las facultades inherentes al ejercicio del presente mandato.",
-    "DOCUMENTOS: 1. Contrato de Prestación de Servicios. 2. Poder. 3. Política de Tratamiento de Datos. 4. Copia de la cédula de ciudadanía.",
-    "Si necesitas ayuda para remitir el correo o adjuntar los documentos, comunícate con nosotros para guiarte en el proceso.",
-    "Recuerda: cada proceso es único y aquí estamos para ayudarte.",
-  ];
-  for (const paragraph of paragraphs) y = drawWrapped(page, paragraph, 42, y - 13, 511, 10.5, paragraph.startsWith("ASUNTO") || paragraph.startsWith("DOCUMENTOS") ? bold : regular, rgb(.17,.17,.17), 15);
-  page.drawText("Documento preparado para firma electrónica", { x: 42, y: 32, size: 8, font: regular, color: rgb(.4,.4,.4) });
+async function buildTemplatePdf(env, title, content) {
+  const pdf = await PDFDocument.create();
+  const regular = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const navy = rgb(2 / 255, 46 / 255, 104 / 255);
+  const ink = rgb(.12, .14, .17);
+  const compact = /poder/i.test(title);
+  let logo = null;
+  try {
+    const response = await env.ASSETS.fetch(new Request("https://assets.local/assets/images/simbolo-azul.png"));
+    if (response.ok) logo = await pdf.embedPng(await response.arrayBuffer());
+  } catch {}
+
+  let page; let y;
+  const addPage = () => {
+    page = pdf.addPage([612, 792]);
+    if (logo) {
+      const size = logo.scaleToFit(74, 58);
+      page.drawImage(logo, { x: (612 - size.width) / 2, y: 716, width: size.width, height: size.height });
+    }
+    const firm = "UMBARILA GUTIÉRREZ & ASOCIADOS";
+    page.drawText(firm, { x: (612 - regular.widthOfTextAtSize(firm, 11)) / 2, y: 697, size: 11, font: regular, color: navy });
+    page.drawLine({ start: { x: 76, y: 55 }, end: { x: 536, y: 55 }, thickness: 1.2, color: navy });
+    const email = "umbarilagutierrez.asoc@gmail.com"; const phones = "305 459 1405 - 319 453 2248";
+    page.drawText(email, { x: (612 - regular.widthOfTextAtSize(email, 9.5)) / 2, y: 39, size: 9.5, font: regular, color: navy });
+    page.drawText(phones, { x: (612 - regular.widthOfTextAtSize(phones, 9)) / 2, y: 25, size: 9, font: regular, color: navy });
+    y = 668;
+  };
+  addPage();
+
+  const paragraphs = String(content || "").replace(/\r/g, "").split("\n");
+  for (const raw of paragraphs) {
+    const text = raw.trim();
+    if (!text) { y -= compact ? 4 : 8; continue; }
+    const isTitle = text === title.toUpperCase() || text === title;
+    const isHeading = isTitle || /^(CLÁUSULA|PARÁGRAFO|AUTORIZACIÓN|ASUNTO:|REFERENCIA:|PODERDANTE|ACEPTA|TITULAR DE LOS DATOS|EL CONTRATANTE|LA CONTRATISTA)/i.test(text) || (/^[A-ZÁÉÍÓÚÑ0-9 .,:;()%-]+$/.test(text) && text.length < 110);
+    const font = isHeading ? bold : regular;
+    const size = isTitle ? 13.5 : isHeading ? (compact ? 10.1 : 10.5) : (compact ? 9.1 : 9.7);
+    const lineHeight = isTitle ? 18 : (compact ? 11.7 : 13.5);
+    const lines = wrapPdfText(text, font, size, 452);
+    const needed = lines.length * lineHeight + (isHeading ? 6 : 4);
+    if (y - needed < 76) addPage();
+    for (const line of lines) {
+      if (y - lineHeight < 76) addPage();
+      const x = isTitle ? (612 - font.widthOfTextAtSize(line, size)) / 2 : 80;
+      page.drawText(line, { x, y, size, font, color: isTitle ? navy : ink });
+      y -= lineHeight;
+    }
+    y -= compact ? 2 : isHeading ? 5 : 4;
+  }
   return pdf.save();
+}
+
+function wrapPdfText(text, font, size, width) {
+  const words = text.split(/\s+/); const lines = []; let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && font.widthOfTextAtSize(candidate, size) > width) { lines.push(line); line = word; }
+    else line = candidate;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function renderTemplate(content, record) {
+  const fallback = "____________________________";
+  const values = {
+    cliente_nombre: record.full_name || fallback,
+    cliente_identificacion: record.identification || fallback,
+    cliente_correo: record.email || fallback,
+    cliente_telefono: record.phone || fallback,
+    caso_titulo: record.title || fallback,
+    caso_referencia: record.reference || record.title || fallback,
+    caso_descripcion: record.description || record.title || fallback,
+    fecha_larga: new Intl.DateTimeFormat("es-CO", { dateStyle: "long", timeZone: "America/Bogota" }).format(new Date()),
+  };
+  return String(content || "").replace(/\{\{([a-z_]+)\}\}/g, (_, key) => values[key] ?? fallback);
 }
 
 async function addSignature(original, signatureDataUrl, signer) {
@@ -273,8 +364,12 @@ function drawWrapped(page, text, x, y, width, size, font, color, lineHeight) {
 }
 
 function buildEmailDraft(doc, pdfBytes) {
-  const boundary = `ug-${crypto.randomUUID()}`; const subject = "PODER ESPECIAL - LEY 2213 DE 2022";
-  const body = "En cumplimiento de lo dispuesto en la Ley 2213 del 13 de junio de 2022, y de conformidad con lo establecido en su artículo 5.º, por medio del presente escrito confiero poder especial, amplio y suficiente a los abogados relacionados en el documento adjunto, para que, en mi nombre y representación, promuevan, adelanten y lleven hasta su culminación el medio de control de nulidad y restablecimiento del derecho en contra de la Subred Integrada de Servicios de Salud Sur Occidente E.S.E., con las facultades inherentes al ejercicio del presente mandato.";
+  const boundary = `ug-${crypto.randomUUID()}`;
+  const isPower = doc.template_id === "template-special-power" || /poder/i.test(doc.title || "");
+  const subject = isPower ? "PODER ESPECIAL - LEY 2213 DE 2022" : `DOCUMENTO FIRMADO - ${String(doc.title || "DOCUMENTO").toUpperCase()}`;
+  const body = isPower
+    ? "En cumplimiento de lo dispuesto en la Ley 2213 del 13 de junio de 2022, y de conformidad con lo establecido en su artículo 5.º, por medio del presente escrito confiero poder especial, amplio y suficiente a los abogados relacionados en el documento adjunto, para que, en mi nombre y representación, promuevan, adelanten y lleven hasta su culminación el medio de control de nulidad y restablecimiento del derecho en contra de la Subred Integrada de Servicios de Salud Sur Occidente E.S.E., con las facultades inherentes al ejercicio del presente mandato."
+    : `Adjunto remito el documento ${doc.title || "solicitado"}, debidamente firmado, para su revisión y trámite correspondiente.`;
   const base64 = bytesToBase64(pdfBytes).replace(/(.{76})/g, "$1\r\n");
   return [`To: umbarilagutierrez.asoc@gmail.com`, `Subject: ${subject}`, "MIME-Version: 1.0", `Content-Type: multipart/mixed; boundary=\"${boundary}\"`, "", `--${boundary}`, "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit", "", body, "", `--${boundary}`, "Content-Type: application/pdf; name=\"documento-firmado.pdf\"", "Content-Transfer-Encoding: base64", "Content-Disposition: attachment; filename=\"documento-firmado.pdf\"", "", base64, `--${boundary}--`, ""].join("\r\n");
 }
@@ -299,6 +394,14 @@ async function storedFile(env, key, filename) {
 async function audit(env, documentId, userId, event, detail, ipHash = null) {
   await env.PORTAL_DB.prepare("INSERT INTO portal_audit (id,document_id,actor_user_id,event,detail,ip_hash,created_at) VALUES (?,?,?,?,?,?,?)")
     .bind(crypto.randomUUID(), documentId, userId, event, detail, ipHash, new Date().toISOString()).run();
+}
+
+async function ensureTemplates(env) {
+  const now = new Date().toISOString();
+  for (const template of DEFAULT_TEMPLATES) {
+    await env.PORTAL_DB.prepare("INSERT OR IGNORE INTO portal_templates (id,name,description,content,active,created_at,updated_at) VALUES (?,?,?,?,1,?,?)")
+      .bind(template.id, template.name, template.description, template.content, now, now).run();
+  }
 }
 
 function validateAccount(body) {
