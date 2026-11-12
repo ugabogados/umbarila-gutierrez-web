@@ -127,7 +127,8 @@
       const signingUrl = item.signing_token ? `${location.origin}/${item.signing_token.length <= 16 ? "f" : "firmar"}/${item.signing_token}` : "";
       const activeLink = signingUrl && item.status !== "expired";
       const expiry = item.expires_at ? new Intl.DateTimeFormat("es-CO", { dateStyle:"medium" }).format(new Date(item.expires_at)) : "";
-      return `<article class="document-compact"><div class="document-main"><strong>${esc(item.title)}</strong><small>${esc(item.client_name)} · ${esc(item.case_title)}</small></div><span class="document-date">${esc(formatDate(item.created_at))}</span><span class="badge ${item.status}">${documentStatus(item.status)}</span><details class="document-menu"><summary>Acciones</summary><div><a href="/api/portal/documents/${item.id}/file" target="_blank" rel="noopener">Previsualizar PDF</a>${activeLink ? `<a href="${esc(signingUrl)}" target="_blank" rel="noopener">Abrir enlace</a><button type="button" data-copy-signing="${esc(signingUrl)}">Copiar enlace</button><a href="https://wa.me/?text=${encodeURIComponent(`Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${signingUrl}`)}" target="_blank" rel="noopener">Enviar por WhatsApp</a>` : `<button type="button" data-regenerate-link="${item.id}">Generar nuevo enlace</button>`}<details class="compact-history"><summary>Historial (${links.length})</summary>${links.map(link => `<small>${link.used_at ? "Usado" : link.revoked_at ? "Reemplazado" : new Date(link.expires_at) <= new Date() ? "Vencido" : `Activo hasta ${expiry}`}</small>`).join("")}</details><button class="danger-action" type="button" data-delete-document="${item.id}" data-document-title="${esc(item.title)}">Eliminar</button></div></details></article>`;
+      const signatureRecord = item.status === "signed" ? signatureMetadata(item) : "";
+      return `<article class="document-compact"><div class="document-main"><strong>${esc(item.title)}</strong><small>${esc(item.client_name)} · ${esc(item.case_title)}</small></div><span class="document-date">${esc(formatDate(item.created_at))}</span><span class="badge ${item.status}">${documentStatus(item.status)}</span><details class="document-menu"><summary>Acciones</summary><div><a href="/api/portal/documents/${item.id}/file" target="_blank" rel="noopener">Previsualizar PDF</a>${activeLink ? `<a href="${esc(signingUrl)}" target="_blank" rel="noopener">Abrir enlace</a><button type="button" data-copy-signing="${esc(signingUrl)}">Copiar enlace</button><a href="https://wa.me/?text=${encodeURIComponent(`Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${signingUrl}`)}" target="_blank" rel="noopener">Enviar por WhatsApp</a>` : `<button type="button" data-regenerate-link="${item.id}">Generar nuevo enlace</button>`}${signatureRecord}<details class="compact-history"><summary>Historial (${links.length})</summary>${links.map(link => `<small>${link.used_at ? "Usado" : link.revoked_at ? "Reemplazado" : new Date(link.expires_at) <= new Date() ? "Vencido" : `Activo hasta ${expiry}`}</small>`).join("")}</details><button class="danger-action" type="button" data-delete-document="${item.id}" data-document-title="${esc(item.title)}">Eliminar</button></div></details></article>`;
     }).join("") || empty("No se encontraron documentos.");
   }
 
@@ -497,8 +498,17 @@
     }
   }
   function setStatus(element, message, success=false) { element.textContent=message; element.classList.toggle("success", success); if (message) setTimeout(()=>{ if(element.textContent===message) element.textContent=""; },5000); }
+  function signatureMetadata(item) {
+    let location = {};
+    try { location = JSON.parse(item.signer_location || "{}"); } catch {}
+    const place = [location.city, location.region, location.country].filter(Boolean).join(", ") || "No disponible para esta firma";
+    const coordinates = location.latitude && location.longitude ? `${location.latitude}, ${location.longitude}` : "Sin coordenadas disponibles";
+    const timezone = location.timezone ? `Zona horaria: ${location.timezone}` : "";
+    return `<div class="signature-metadata"><strong>Registro de firma</strong><small><b>UTC:</b> ${esc(formatUtc(item.signed_at))}</small><small><b>Ubicación aproximada:</b> ${esc(place)}</small><small>${esc(coordinates)}${timezone ? ` · ${esc(timezone)}` : ""}</small></div>`;
+  }
   function empty(message) { return `<p class="muted">${esc(message)}</p>`; }
   function formatDate(value) { return new Intl.DateTimeFormat("es-CO", { dateStyle:"medium", timeStyle:"short" }).format(new Date(value)); }
+  function formatUtc(value) { if (!value) return "No disponible"; return new Intl.DateTimeFormat("es-CO", { year:"numeric", month:"short", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false, timeZone:"UTC", timeZoneName:"short" }).format(new Date(value)); }
   function documentStatus(status) { return ({ pending:"Sin firmar", signed:"Firmado", expired:"Enlace vencido" })[status] || "Sin firmar"; }
   function esc(value) { return String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char])); }
   boot();

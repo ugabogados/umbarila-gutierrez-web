@@ -329,15 +329,31 @@ async function signingApi(request, env, token, suffix) {
     if (!hasLayoutMarker && doc.content_snapshot) originalBytes = await buildTemplatePdf(env, doc.template_name || doc.title, doc.content_snapshot, doc.background_key_snapshot);
   } catch {}
   const signedAt = new Date().toISOString();
+  const signerLocation = signingLocation(request);
   const signedPdf = await addSignature(env, new Uint8Array(originalBytes), body.signature, { name: clean(body.signerName, 140), identification: clean(body.signerIdentification, 40), email: normalizeOptionalEmail(body.signerEmail), signedAt }, doc.background_key_snapshot);
   const signedKey = `documents/${doc.id}/signed.pdf`; const pdfHash = await sha256Bytes(signedPdf);
   await putFile(env, signedKey, signedPdf, "application/pdf", { sha256: pdfHash });
-  await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='signed',signed_key=?,signer_name=?,signer_identification=?,signer_email=?,signed_at=?,pdf_hash=?,updated_at=? WHERE id=?")
-    .bind(signedKey, clean(body.signerName, 140), clean(body.signerIdentification, 40), normalizeOptionalEmail(body.signerEmail), signedAt, pdfHash, signedAt, doc.id).run();
+  await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='signed',signed_key=?,signer_name=?,signer_identification=?,signer_email=?,signed_at=?,signer_location=?,pdf_hash=?,updated_at=? WHERE id=?")
+    .bind(signedKey, clean(body.signerName, 140), clean(body.signerIdentification, 40), normalizeOptionalEmail(body.signerEmail), signedAt, signerLocation, pdfHash, signedAt, doc.id).run();
   await env.PORTAL_DB.prepare("UPDATE portal_document_links SET used_at=? WHERE id=?").bind(signedAt, doc.link_id).run();
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
   await audit(env, doc.id, null, "document.signed", `Firmado por ${clean(body.signerName, 140)}`, await sha256(`${env.AUDIT_SALT || "ug"}:${ip}`));
   return json({ ok: true, signedAt });
+}
+
+function signingLocation(request) {
+  const cf = request.cf || {};
+  const location = {
+    city: clean(cf.city, 120),
+    region: clean(cf.region, 120),
+    regionCode: clean(cf.regionCode, 20),
+    country: clean(cf.country, 20),
+    postalCode: clean(cf.postalCode, 30),
+    timezone: clean(cf.timezone, 80),
+    latitude: clean(cf.latitude, 30),
+    longitude: clean(cf.longitude, 30),
+  };
+  return Object.values(location).some(Boolean) ? JSON.stringify(location) : null;
 }
 
 async function buildTemplatePdf(env, title, content, backgroundKey = null) {
