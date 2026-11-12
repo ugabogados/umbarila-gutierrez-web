@@ -325,7 +325,7 @@ async function signingApi(request, env, token, suffix) {
   if (body.signature.length > 1500000) return json({ error: "La firma es demasiado grande." }, 413);
   const original = await getFile(env, doc.unsigned_key); let originalBytes = new Uint8Array(original.data);
   try {
-    const existingPdf = await PDFDocument.load(originalBytes); const hasLayoutMarker = /^UG_CONTENT_BOTTOM:/.test(existingPdf.getSubject() || "");
+    const existingPdf = await PDFDocument.load(originalBytes); const hasLayoutMarker = /^UG_(?:CONTENT_BOTTOM|LAYOUT):/.test(existingPdf.getSubject() || "");
     if (!hasLayoutMarker && doc.content_snapshot) originalBytes = await buildTemplatePdf(env, doc.template_name || doc.title, doc.content_snapshot, doc.background_key_snapshot);
   } catch {}
   const signedAt = new Date().toISOString();
@@ -362,6 +362,14 @@ async function buildTemplatePdf(env, title, content, backgroundKey = null) {
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const italic = await pdf.embedFont(StandardFonts.HelveticaOblique);
   const boldItalic = await pdf.embedFont(StandardFonts.HelveticaBoldOblique);
+  const times = await pdf.embedFont(StandardFonts.TimesRoman);
+  const timesBold = await pdf.embedFont(StandardFonts.TimesRomanBold);
+  const timesItalic = await pdf.embedFont(StandardFonts.TimesRomanItalic);
+  const timesBoldItalic = await pdf.embedFont(StandardFonts.TimesRomanBoldItalic);
+  const courier = await pdf.embedFont(StandardFonts.Courier);
+  const courierBold = await pdf.embedFont(StandardFonts.CourierBold);
+  const courierItalic = await pdf.embedFont(StandardFonts.CourierOblique);
+  const courierBoldItalic = await pdf.embedFont(StandardFonts.CourierBoldOblique);
   const navy = rgb(2 / 255, 46 / 255, 104 / 255);
   const ink = rgb(.12, .14, .17);
   const compact = /poder/i.test(title);
@@ -393,25 +401,40 @@ async function buildTemplatePdf(env, title, content, backgroundKey = null) {
 
   if (looksLikeRichText(content)) {
     const blocks = parseRichText(content);
+    let signaturePlacement = null;
     const fontFor = (run, forceBold = false) => {
       const strong = forceBold || run.bold;
-      return strong && run.italic ? boldItalic : strong ? bold : run.italic ? italic : regular;
+      const family = /courier/i.test(run.family || "")
+        ? { regular:courier, bold:courierBold, italic:courierItalic, boldItalic:courierBoldItalic }
+        : /(times|georgia)/i.test(run.family || "")
+          ? { regular:times, bold:timesBold, italic:timesItalic, boldItalic:timesBoldItalic }
+          : { regular, bold, italic, boldItalic };
+      return strong && run.italic ? family.boldItalic : strong ? family.bold : run.italic ? family.italic : family.regular;
     };
     for (const block of blocks) {
+      if (block.tag === "signature") {
+        if (y - 105 < 76) addPage();
+        signaturePlacement = { pageIndex:pdf.getPageCount() - 1, top:y };
+        page.drawRectangle({ x:80, y:y - 82, width:190, height:72, borderColor:rgb(.62,.68,.73), borderWidth:.8, color:rgb(.97,.98,.99) });
+        page.drawText("ESPACIO PARA FIRMA", { x:117, y:y - 49, size:8.5, font:bold, color:rgb(.42,.46,.5) });
+        page.drawLine({ start:{ x:98, y:y - 68 }, end:{ x:252, y:y - 68 }, thickness:.6, color:rgb(.62,.68,.73) });
+        y -= 105;
+        continue;
+      }
       const heading = /^h[1-3]$/.test(block.tag);
       const size = block.tag === "h1" ? 15 : block.tag === "h2" ? 13 : block.tag === "h3" ? 11.5 : (compact ? 9.1 : 9.7);
-      const lineHeight = heading ? size * 1.35 : (compact ? 11.7 : 13.5);
-      const lines = wrapRichRuns(block.runs, run => fontFor(run, heading), size, 452);
-      if (!lines.length) { y -= lineHeight; continue; }
-      if (y - lines.length * lineHeight < 76) addPage();
+      const lines = wrapRichRuns(block.runs, run => fontFor(run, heading), run => richFontSize(run, size), 452);
+      if (!lines.length) { y -= heading ? size * 1.35 : (compact ? 11.7 : 13.5); continue; }
       for (const line of lines) {
+        const lineSize = Math.max(...line.map(segment => segment.size), size);
+        const lineHeight = heading ? lineSize * 1.35 : lineSize * (compact ? 1.28 : 1.4);
         if (y - lineHeight < 76) addPage();
         const lineWidth = line.reduce((total, segment) => total + segment.width, 0);
         let x = 80;
         if (block.align === "center") x += (452 - lineWidth) / 2;
         if (block.align === "right") x += 452 - lineWidth;
         for (const segment of line) {
-          page.drawText(segment.text, { x, y, size, font: segment.font, color: heading ? navy : ink });
+          page.drawText(segment.text, { x, y, size:segment.size, font: segment.font, color: heading ? navy : ink });
           if (segment.underline) page.drawLine({ start:{ x, y:y - 1.5 }, end:{ x:x + segment.width, y:y - 1.5 }, thickness:.65, color:heading ? navy : ink });
           x += segment.width;
         }
@@ -419,7 +442,9 @@ async function buildTemplatePdf(env, title, content, backgroundKey = null) {
       }
       y -= heading ? 6 : 4;
     }
-    pdf.setSubject(`UG_CONTENT_BOTTOM:${Math.max(0, y).toFixed(2)}`);
+    pdf.setSubject(signaturePlacement
+      ? `UG_LAYOUT:${Math.max(0, y).toFixed(2)}:${signaturePlacement.pageIndex}:${signaturePlacement.top.toFixed(2)}`
+      : `UG_CONTENT_BOTTOM:${Math.max(0, y).toFixed(2)}`);
     return pdf.save();
   }
 
@@ -463,8 +488,8 @@ function looksLikeRichText(content) {
 function parseRichText(html) {
   const source = String(html || "").replace(/<!--[\s\S]*?-->/g, "").replace(/<(script|style|iframe|object)\b[\s\S]*?<\/\1\s*>/gi, "");
   const tokens = source.match(/<[^>]+>|[^<]+/g) || [];
-  const blocks = []; const style = { bold:0, italic:0, underline:0 }; const lists = [];
-  let current = null;
+  const blocks = []; const style = { bold:0, italic:0, underline:0, families:[], sizes:[] }; const lists = [];
+  let current = null; let signatureMarker = false;
   const finish = () => {
     if (!current) return;
     current.runs = current.runs.filter(run => run.text).map(run => ({ ...run, text:run.text.replace(/[ \t]+/g, " ") }));
@@ -484,18 +509,20 @@ function parseRichText(html) {
   const addText = text => {
     if (text === "\n") {
       if (!current) start("p");
-      current.runs.push({ text:"\n", bold:style.bold > 0, italic:style.italic > 0, underline:style.underline > 0 });
+      current.runs.push({ text:"\n", bold:style.bold > 0, italic:style.italic > 0, underline:style.underline > 0, family:style.families.at(-1) || "", size:style.sizes.at(-1) || "" });
       return;
     }
     const decoded = decodeHtmlEntities(text).replace(/\r?\n/g, " ");
     if (!decoded) return;
     if (!current) start("p");
-    current.runs.push({ text:decoded, bold:style.bold > 0, italic:style.italic > 0, underline:style.underline > 0 });
+    current.runs.push({ text:decoded, bold:style.bold > 0, italic:style.italic > 0, underline:style.underline > 0, family:style.families.at(-1) || "", size:style.sizes.at(-1) || "" });
   };
   for (const token of tokens) {
-    if (!token.startsWith("<")) { addText(token); continue; }
+    if (!token.startsWith("<")) { if (!signatureMarker) addText(token); continue; }
     const closing = /^<\s*\//.test(token); const name = (token.match(/^<\s*\/?\s*([a-z0-9]+)/i) || [])[1]?.toLowerCase();
     if (!name) continue;
+    if (!closing && name === "div" && /data-signature-marker\s*=\s*["']?true/i.test(token)) { finish(); blocks.push({ tag:"signature", align:"left", runs:[] }); signatureMarker = true; continue; }
+    if (signatureMarker) { if (closing && name === "div") signatureMarker = false; continue; }
     if (!closing && ["p","div","h1","h2","h3","li"].includes(name)) start(name, token);
     else if (closing && ["p","div","h1","h2","h3","li"].includes(name)) finish();
     else if (!closing && (name === "ul" || name === "ol")) { finish(); lists.push({ type:name, count:0 }); }
@@ -504,6 +531,13 @@ function parseRichText(html) {
     else if (["strong","b"].includes(name)) style.bold = Math.max(0, style.bold + (closing ? -1 : 1));
     else if (["em","i"].includes(name)) style.italic = Math.max(0, style.italic + (closing ? -1 : 1));
     else if (name === "u") style.underline = Math.max(0, style.underline + (closing ? -1 : 1));
+    else if (name === "font") {
+      if (closing) { style.families.pop(); style.sizes.pop(); }
+      else {
+        style.families.push((/face\s*=\s*["']?([^"'>]+)/i.exec(token) || [])[1] || "");
+        style.sizes.push((/size\s*=\s*["']?([1-7])/i.exec(token) || [])[1] || "");
+      }
+    }
   }
   finish();
   return blocks;
@@ -519,11 +553,16 @@ function decodeHtmlEntities(text) {
   });
 }
 
-function wrapRichRuns(runs, fontFor, size, width) {
+function richFontSize(run, fallback) {
+  return ({ 1:7.5, 2:8.5, 3:9.7, 4:11.5, 5:14, 6:18, 7:24 })[Number(run.size)] || fallback;
+}
+
+function wrapRichRuns(runs, fontFor, sizeFor, width) {
   const lines = []; let line = []; let lineWidth = 0; let pendingSpace = false;
   const pushLine = () => { if (line.length) lines.push(line); line = []; lineWidth = 0; pendingSpace = false; };
   for (const run of runs) {
     const font = fontFor(run);
+    const size = sizeFor(run);
     for (const token of run.text.split(/(\n|\s+)/)) {
       if (!token) continue;
       if (token === "\n") { pushLine(); continue; }
@@ -531,7 +570,7 @@ function wrapRichRuns(runs, fontFor, size, width) {
       const prefix = pendingSpace && line.length ? " " : "";
       let value = prefix + token; let tokenWidth = font.widthOfTextAtSize(value, size);
       if (line.length && lineWidth + tokenWidth > width) { pushLine(); value = token; tokenWidth = font.widthOfTextAtSize(value, size); }
-      line.push({ text:value, width:tokenWidth, font, underline:run.underline }); lineWidth += tokenWidth; pendingSpace = false;
+      line.push({ text:value, width:tokenWidth, font, size, underline:run.underline }); lineWidth += tokenWidth; pendingSpace = false;
     }
   }
   pushLine(); return lines;
@@ -578,11 +617,11 @@ async function addSignature(env, original, signatureDataUrl, signer, backgroundK
   const pdf = await PDFDocument.load(original);
   const regular = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const navy = rgb(1/255,27/255,54/255); const ink = rgb(.18,.2,.23);
-  const subject = pdf.getSubject() || ""; const bottomMatch = /^UG_CONTENT_BOTTOM:([0-9.]+)$/.exec(subject);
-  const contentBottom = bottomMatch ? Number(bottomMatch[1]) : null;
-  const pages = pdf.getPages(); let page = pages[pages.length - 1]; let top = contentBottom ? contentBottom - 8 : 0;
+  const subject = pdf.getSubject() || ""; const bottomMatch = /^UG_CONTENT_BOTTOM:([0-9.]+)$/.exec(subject); const layoutMatch = /^UG_LAYOUT:([0-9.]+):(\d+):([0-9.]+)$/.exec(subject);
+  const contentBottom = bottomMatch ? Number(bottomMatch[1]) : layoutMatch ? Number(layoutMatch[1]) : null;
+  const pages = pdf.getPages(); const placedSignature = Boolean(layoutMatch); let page = placedSignature ? pages[Math.min(Number(layoutMatch[2]), pages.length - 1)] : pages[pages.length - 1]; let top = placedSignature ? Number(layoutMatch[3]) : contentBottom ? contentBottom - 8 : 0;
   const blockHeight = 145; const pageBottom = 72;
-  if (!contentBottom || top - blockHeight < pageBottom) {
+  if (!placedSignature && (!contentBottom || top - blockHeight < pageBottom)) {
     const { width, height } = page.getSize(); page = pdf.addPage([width, height]); top = height - 118;
     let customBackground = null;
     if (backgroundKey) {
@@ -604,14 +643,16 @@ async function addSignature(env, original, signatureDataUrl, signer, backgroundK
     }
   }
   const left = 80; const usableWidth = page.getWidth() - 160;
-  page.drawLine({ start:{ x:left, y:top + 10 }, end:{ x:left + usableWidth, y:top + 10 }, thickness:.7, color:rgb(.72,.76,.8) });
-  page.drawText("CONSTANCIA DE FIRMA", { x:left, y:top, size:12.5, font:bold, color:navy });
-  drawWrapped(page, "La persona identificada manifiesta su aceptación y firma el documento mediante el enlace individual suministrado por la firma.", left, top - 18, usableWidth, 8.8, regular, ink, 11);
+  if (!placedSignature) {
+    page.drawLine({ start:{ x:left, y:top + 10 }, end:{ x:left + usableWidth, y:top + 10 }, thickness:.7, color:rgb(.72,.76,.8) });
+    page.drawText("CONSTANCIA DE FIRMA", { x:left, y:top, size:12.5, font:bold, color:navy });
+    drawWrapped(page, "La persona identificada manifiesta su aceptación y firma el documento mediante el enlace individual suministrado por la firma.", left, top - 18, usableWidth, 8.8, regular, ink, 11);
+  }
   const pngBytes = Uint8Array.from(atob(signatureDataUrl.split(",")[1]), c => c.charCodeAt(0));
-  const signature = await pdf.embedPng(pngBytes); const box = { x:left, y:top - 137, width:190, height:82 }; const scaled = signature.scaleToFit(174, 68);
-  page.drawRectangle({ ...box, borderColor:rgb(.72,.76,.8), borderWidth:.8, color:rgb(1,1,1), opacity:.72 });
+  const signature = await pdf.embedPng(pngBytes); const box = { x:left, y:placedSignature ? top - 82 : top - 137, width:190, height:placedSignature ? 72 : 82 }; const scaled = signature.scaleToFit(174, placedSignature ? 58 : 68);
+  page.drawRectangle({ ...box, borderColor:rgb(.72,.76,.8), borderWidth:.8, color:rgb(1,1,1), opacity:1 });
   page.drawImage(signature, { x:box.x + (box.width - scaled.width) / 2, y:box.y + (box.height - scaled.height) / 2, width:scaled.width, height:scaled.height });
-  const detailX = left + 215; let detailY = top - 65;
+  const detailX = left + 215; let detailY = placedSignature ? top - 18 : top - 65;
   page.drawText("Firmado por", { x:detailX, y:detailY, size:8.2, font:regular, color:rgb(.38,.42,.47) }); detailY -= 15;
   detailY = drawWrapped(page, signer.name, detailX, detailY, usableWidth - 215, 9.5, bold, navy, 11); detailY -= 3;
   page.drawText(`Identificación: ${signer.identification}`, { x:detailX, y:detailY, size:8.5, font:regular, color:ink }); detailY -= 13;

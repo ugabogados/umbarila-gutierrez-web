@@ -154,8 +154,13 @@
       : `<div class="institutional-background-sample"><strong>UG</strong><span>UMBARILA GUTIÉRREZ &amp; ASOCIADOS</span><small>Fondo institucional predeterminado</small></div>`;
     document.querySelector("#remove-template-background").disabled = !selected.background_key;
     const editor = document.querySelector("#template-rich-editor");
+    const paperUrl = selected.background_key
+      ? `/api/portal/templates/${encodeURIComponent(selected.id)}/background?v=${encodeURIComponent(selected.updated_at || "")}`
+      : "/assets/images/papel-institucional-editor.svg";
+    editor.style.setProperty("--paper-image", `url("${paperUrl}")`);
     editor.innerHTML = sanitizeTemplateHtml(looksLikeHtml(selected.content) ? selected.content : plainToEditorHtml(selected.content));
     syncRichEditor();
+    requestAnimationFrame(updateEditorPageCount);
     renderTemplateVariableList();
   }
 
@@ -196,6 +201,7 @@
     document.querySelectorAll(".view").forEach(panel => panel.classList.toggle("active", panel.dataset.panel === button.dataset.view));
     document.querySelector("#view-title").textContent = button.textContent;
     document.querySelector(".sidebar").classList.remove("open");
+    if (button.dataset.view === "templates") requestAnimationFrame(updateEditorPageCount);
   });
   document.querySelector("#mobile-nav").addEventListener("click", event => {
     const open = document.querySelector(".sidebar").classList.toggle("open"); event.currentTarget.setAttribute("aria-expanded", String(open));
@@ -260,7 +266,7 @@
   richEditor.addEventListener("mouseup", rememberEditorRange);
   richEditor.addEventListener("focus", rememberEditorRange);
   document.addEventListener("selectionchange", rememberEditorRange);
-  document.querySelector(".rich-toolbar").addEventListener("mousedown", event => event.preventDefault());
+  document.querySelector(".rich-toolbar").addEventListener("mousedown", event => { if (event.target.closest("button")) event.preventDefault(); });
   document.querySelector(".rich-toolbar").addEventListener("click", event => {
     const command = event.target.closest("[data-rich-command]")?.dataset.richCommand;
     const block = event.target.closest("[data-rich-block]")?.dataset.richBlock;
@@ -269,6 +275,9 @@
     document.execCommand(block ? "formatBlock" : command, false, block ? `<${block}>` : null);
     syncRichEditor();
   });
+  document.querySelector("#editor-font-family").addEventListener("change", event => applyRichCommand("fontName", event.target.value));
+  document.querySelector("#editor-font-size").addEventListener("change", event => applyRichCommand("fontSize", event.target.value));
+  document.querySelector("#insert-signature-marker").addEventListener("click", insertSignatureMarker);
   document.querySelector("#insert-template-variable").addEventListener("click", () => {
     const input = document.querySelector("#template-variable-name");
     const key = variableKey(input.value);
@@ -368,11 +377,36 @@
     rememberEditorRange(); syncRichEditor();
   }
 
+  function applyRichCommand(command, value) {
+    const selection = window.getSelection(); selection.removeAllRanges();
+    if (savedEditorRange && richEditor.contains(savedEditorRange.commonAncestorContainer)) selection.addRange(savedEditorRange);
+    else { richEditor.focus(); const end=document.createRange(); end.selectNodeContents(richEditor); end.collapse(false); selection.addRange(end); }
+    document.execCommand(command, false, value);
+    rememberEditorRange(); syncRichEditor();
+  }
+
+  function insertSignatureMarker() {
+    const existing = richEditor.querySelector("[data-signature-marker='true']");
+    if (existing) { existing.scrollIntoView({ behavior:"smooth", block:"center" }); setStatus(globalStatus, "La plantilla ya tiene un espacio de firma."); return; }
+    const selection = window.getSelection(); selection.removeAllRanges();
+    if (savedEditorRange && richEditor.contains(savedEditorRange.commonAncestorContainer)) selection.addRange(savedEditorRange);
+    else { richEditor.focus(); const end=document.createRange(); end.selectNodeContents(richEditor); end.collapse(false); selection.addRange(end); }
+    document.execCommand("insertHTML", false, '<div class="signature-placement" data-signature-marker="true" contenteditable="false">FIRMA DEL CLIENTE</div><p><br></p>');
+    rememberEditorRange(); syncRichEditor();
+  }
+
   function syncRichEditor() {
     const editor = document.querySelector("#template-rich-editor");
     const content = sanitizeTemplateHtml(editor.innerHTML);
     document.querySelector("#template-editor textarea[name=content]").value = content;
     renderTemplateVariableList();
+    updateEditorPageCount();
+  }
+
+  function updateEditorPageCount() {
+    const editor = document.querySelector("#template-rich-editor");
+    const pages = Math.max(1, Math.ceil(editor.scrollHeight / 1056));
+    document.querySelector("#editor-page-count").textContent = `${pages} página${pages === 1 ? "" : "s"}`;
   }
 
   function looksLikeHtml(content) { return /<(p|div|h[1-3]|ul|ol|li|strong|b|em|i|u|br)\b/i.test(String(content || "")); }
@@ -383,7 +417,7 @@
 
   function sanitizeTemplateHtml(html) {
     const holder = document.createElement("template"); holder.innerHTML = String(html || "");
-    const allowed = new Set(["P","DIV","H1","H2","H3","STRONG","B","EM","I","U","UL","OL","LI","BR"]);
+    const allowed = new Set(["P","DIV","H1","H2","H3","STRONG","B","EM","I","U","UL","OL","LI","BR","FONT"]);
     const cleanNode = node => {
       [...node.childNodes].forEach(child => {
         if (child.nodeType !== Node.ELEMENT_NODE) return;
@@ -391,7 +425,13 @@
         cleanNode(child);
         if (!allowed.has(child.tagName)) { child.replaceWith(...child.childNodes); return; }
         const alignment = (child.style.textAlign || child.getAttribute("align") || "").toLowerCase();
+        const signatureMarker = child.tagName === "DIV" && child.getAttribute("data-signature-marker") === "true";
+        const fontFace = child.tagName === "FONT" ? String(child.getAttribute("face") || "") : "";
+        const fontSize = child.tagName === "FONT" ? String(child.getAttribute("size") || "") : "";
         [...child.attributes].forEach(attribute => child.removeAttribute(attribute.name));
+        if (signatureMarker) { child.className="signature-placement"; child.setAttribute("data-signature-marker","true"); child.setAttribute("contenteditable","false"); child.textContent="FIRMA DEL CLIENTE"; }
+        if (child.tagName === "FONT" && ["Arial","Times New Roman","Courier New"].includes(fontFace)) child.setAttribute("face", fontFace);
+        if (child.tagName === "FONT" && /^[1-7]$/.test(fontSize)) child.setAttribute("size", fontSize);
         if (["left","center","right","justify"].includes(alignment)) child.style.textAlign = alignment;
       });
     };
