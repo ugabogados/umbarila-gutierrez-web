@@ -272,9 +272,7 @@
     const command = event.target.closest("[data-rich-command]")?.dataset.richCommand;
     const block = event.target.closest("[data-rich-block]")?.dataset.richBlock;
     if (!command && !block) return;
-    richEditor.focus();
-    document.execCommand(block ? "formatBlock" : command, false, block ? `<${block}>` : null);
-    syncRichEditor();
+    applyRichCommand(block ? "formatBlock" : command, block || null);
   });
   document.querySelector("#editor-font-family").addEventListener("change", event => applyRichCommand("fontName", event.target.value));
   document.querySelector("#editor-font-size").addEventListener("change", event => applyRichCommand("fontSize", event.target.value));
@@ -391,11 +389,31 @@
   }
 
   function applyRichCommand(command, value) {
+    richEditor.focus({ preventScroll:true });
     const selection = window.getSelection(); selection.removeAllRanges();
     if (savedEditorRange && richEditor.contains(savedEditorRange.commonAncestorContainer)) selection.addRange(savedEditorRange);
-    else { richEditor.focus(); const end=document.createRange(); end.selectNodeContents(richEditor); end.collapse(false); selection.addRange(end); }
+    else { const end=document.createRange(); end.selectNodeContents(richEditor); end.collapse(false); selection.addRange(end); }
+    preserveEditorSelection(() => replaceVariableTokensWithText(richEditor));
     document.execCommand(command, false, value);
+    preserveEditorSelection(() => decorateVariableTokens(richEditor));
     rememberEditorRange(); syncRichEditor();
+  }
+
+  function preserveEditorSelection(callback) {
+    const selection = window.getSelection();
+    if (!selection.rangeCount || !richEditor.contains(selection.getRangeAt(0).commonAncestorContainer)) { callback(); return; }
+    const range = selection.getRangeAt(0).cloneRange();
+    const start = document.createElement("span"); const end = document.createElement("span");
+    start.dataset.selectionMarker = "start"; end.dataset.selectionMarker = "end";
+    const endRange = range.cloneRange(); endRange.collapse(false); endRange.insertNode(end);
+    const startRange = range.cloneRange(); startRange.collapse(true); startRange.insertNode(start);
+    callback();
+    const restored = document.createRange(); restored.setStartAfter(start); restored.setEndBefore(end);
+    start.remove(); end.remove(); selection.removeAllRanges(); selection.addRange(restored);
+  }
+
+  function replaceVariableTokensWithText(editor) {
+    editor.querySelectorAll("[data-variable-token='true']").forEach(token => token.replaceWith(document.createTextNode(`{{${token.dataset.variableKey}}}`)));
   }
 
   function insertSignatureMarker() {
