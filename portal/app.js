@@ -84,8 +84,11 @@
 
   function renderDocuments() {
     document.querySelector("#documents-list").innerHTML = state.documents.map(item => {
-      const status = item.status === "signed" ? "Firmado" : "Pendiente";
-      return `<article class="list-row"><div><strong>${esc(item.title)}</strong><small>${esc(item.client_name)} · ${esc(item.case_title)}</small></div><div class="row-actions"><span class="badge ${item.status}">${status}</span><a href="/api/portal/documents/${item.id}/file">Descargar</a></div></article>`;
+      const labels = { pending:"Sin firmar", signed:"Firmado", expired:"Enlace vencido" };
+      const signingUrl = item.signing_token ? `${location.origin}/firmar/${item.signing_token}` : "";
+      const activeLink = signingUrl && item.status !== "expired";
+      const expiry = item.expires_at ? new Intl.DateTimeFormat("es-CO", { dateStyle:"medium" }).format(new Date(item.expires_at)) : "";
+      return `<article class="list-row document-row"><div class="document-info"><strong>${esc(item.title)}</strong><small>${esc(item.client_name)} · ${esc(item.case_title)}</small><small>${item.status === "signed" && item.signed_at ? `Firmado el ${esc(formatDate(item.signed_at))}` : `Enlace vigente hasta ${esc(expiry)}`}</small>${activeLink ? `<div class="generated-link"><span>${esc(signingUrl)}</span></div>` : ""}</div><div class="row-actions"><span class="badge ${item.status}">${labels[item.status] || "Sin firmar"}</span><a href="/api/portal/documents/${item.id}/file">Descargar</a>${activeLink ? `<a href="${esc(signingUrl)}" target="_blank" rel="noopener">Abrir enlace</a><button type="button" data-copy-signing="${esc(signingUrl)}">Copiar</button><a href="https://wa.me/?text=${encodeURIComponent(`Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${signingUrl}`)}" target="_blank" rel="noopener">WhatsApp</a>` : `<button type="button" data-regenerate-link="${item.id}">Generar nuevo enlace</button>`}</div></article>`;
     }).join("") || empty("Aún no se han generado documentos.");
   }
 
@@ -203,6 +206,23 @@
     catch (error) { setStatus(globalStatus, error.message); }
   });
 
+  document.querySelector("#documents-list").addEventListener("click", async event => {
+    const copy = event.target.closest("[data-copy-signing]");
+    if (copy) {
+      try { await navigator.clipboard.writeText(copy.dataset.copySigning); setStatus(globalStatus, "Enlace copiado.", true); }
+      catch { setStatus(globalStatus, "No fue posible copiar el enlace."); }
+      return;
+    }
+    const regenerate = event.target.closest("[data-regenerate-link]");
+    if (!regenerate) return;
+    regenerate.disabled = true;
+    try {
+      const result = await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"document.link.regenerate", documentId:regenerate.dataset.regenerateLink }) });
+      try { await navigator.clipboard.writeText(result.signingUrl); } catch {}
+      await refresh("Nuevo enlace generado y copiado.");
+    } catch (error) { regenerate.disabled = false; setStatus(globalStatus, error.message); }
+  });
+
   async function shareSigningLink(url) {
     const text = `Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${url}`;
     try { await navigator.clipboard.writeText(url); } catch {}
@@ -227,6 +247,7 @@
   }
   function setStatus(element, message, success=false) { element.textContent=message; element.classList.toggle("success", success); if (message) setTimeout(()=>{ if(element.textContent===message) element.textContent=""; },5000); }
   function empty(message) { return `<p class="muted">${esc(message)}</p>`; }
+  function formatDate(value) { return new Intl.DateTimeFormat("es-CO", { dateStyle:"medium", timeStyle:"short" }).format(new Date(value)); }
   function esc(value) { return String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char])); }
   boot();
 })();

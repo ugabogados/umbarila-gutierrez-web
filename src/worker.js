@@ -111,6 +111,8 @@ function publicUser(user) { return { id: user.id, email: user.email, name: user.
 
 async function snapshot(env, user) {
   await ensureTemplates(env);
+  await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='expired',updated_at=? WHERE status='pending' AND expires_at<=?")
+    .bind(new Date().toISOString(), new Date().toISOString()).run();
   const [clients, stages, cases, documents, users, templates] = await Promise.all([
     env.PORTAL_DB.prepare("SELECT * FROM portal_clients ORDER BY updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT * FROM portal_stages WHERE active=1 ORDER BY position").all(),
@@ -174,6 +176,16 @@ async function actions(request, env, user) {
     await audit(env, null, user.id, "template.updated", `Plantilla actualizada: ${name}`);
     return json({ ok: true });
   }
+  if (body.action === "document.link.regenerate") {
+    const document = await env.PORTAL_DB.prepare("SELECT id,status FROM portal_documents WHERE id=?").bind(body.documentId).first();
+    if (!document) return json({ error: "No se encontró el documento." }, 404);
+    const token = randomToken(32); const expiresAt = new Date(Date.now() + SIGNING_DAYS * 86400000).toISOString();
+    await env.PORTAL_DB.prepare("UPDATE portal_documents SET signing_token=?,signing_token_hash=?,expires_at=?,status=CASE WHEN status='expired' THEN 'pending' ELSE status END,updated_at=? WHERE id=?")
+      .bind(token, await sha256(token), expiresAt, now, document.id).run();
+    await audit(env, document.id, user.id, "document.link.regenerated", "Enlace de firma regenerado");
+    const base = String(env.PUBLIC_ORIGIN || "https://ugabogados.com").replace(/\/$/, "");
+    return json({ ok: true, signingUrl: `${base}/firmar/${token}` });
+  }
   if (body.action === "document.create") return createDocument(env, user, body);
   return json({ error: "Acción desconocida." }, 400);
 }
@@ -188,8 +200,8 @@ async function createDocument(env, user, body) {
   const pdf = await buildTemplatePdf(env, template.name, renderedContent);
   const unsignedKey = `documents/${id}/original.pdf`;
   await putFile(env, unsignedKey, pdf, "application/pdf");
-  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent).run();
+  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
   const base = String(env.PUBLIC_ORIGIN || new URL(body.origin || "https://ugabogados.com").origin).replace(/\/$/, "");
   return json({ ok: true, id, signingUrl: `${base}/firmar/${token}` }, 201);
