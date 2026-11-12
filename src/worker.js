@@ -170,12 +170,21 @@ async function actions(request, env, user) {
   }
   if (body.action === "template.update") {
     const name = clean(body.name, 160); const content = String(body.content || "").trim();
-    if (!name || content.length < 40) return json({ error: "La plantilla necesita un nombre y contenido válido." }, 400);
+    if (!name || !content) return json({ error: "La plantilla necesita un nombre y contenido válido." }, 400);
     const result = await env.PORTAL_DB.prepare("UPDATE portal_templates SET name=?,description=?,content=?,updated_at=?,updated_by=? WHERE id=? AND active=1")
       .bind(name, clean(body.description, 500), content.slice(0, 100000), now, user.id, body.templateId).run();
     if (!result.meta.changes) return json({ error: "No se encontró la plantilla." }, 404);
     await audit(env, null, user.id, "template.updated", `Plantilla actualizada: ${name}`);
     return json({ ok: true });
+  }
+  if (body.action === "template.create") {
+    const name = clean(body.name, 160); const content = String(body.content || "").trim();
+    if (!name || !content) return json({ error: "La plantilla necesita un nombre y contenido válido." }, 400);
+    const id = crypto.randomUUID();
+    await env.PORTAL_DB.prepare("INSERT INTO portal_templates (id,name,description,content,active,created_at,updated_at,updated_by) VALUES (?,?,?,?,1,?,?,?)")
+      .bind(id, name, clean(body.description, 500), content.slice(0, 100000), now, now, user.id).run();
+    await audit(env, null, user.id, "template.created", `Plantilla creada: ${name}`);
+    return json({ ok: true, id }, 201);
   }
   if (body.action === "document.link.regenerate") {
     const document = await env.PORTAL_DB.prepare("SELECT id,status FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(body.documentId).first();
@@ -208,13 +217,14 @@ async function createDocument(env, user, body) {
   const context = await documentContext(env, body);
   if (context.error) return json({ error: context.error }, context.status);
   const { record, template } = context;
+  const variables = sanitizeVariables(body.variables);
   const id = crypto.randomUUID(); const token = randomToken(9); const now = new Date();
-  const renderedContent = renderTemplate(template.content, record);
+  const renderedContent = renderTemplate(template.content, record, variables);
   const pdf = await buildTemplatePdf(env, template.name, renderedContent);
   const unsignedKey = `documents/${id}/original.pdf`;
   await putFile(env, unsignedKey, pdf, "application/pdf");
-  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token,custom_title,custom_reference,custom_description,email_to,email_subject,email_body) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000), normalizeOptionalEmail(body.emailTo), cleanHeader(body.emailSubject, 200), clean(body.emailBody, 5000)).run();
+  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token,custom_title,custom_reference,custom_description,email_to,email_subject,email_body,variables_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000), normalizeOptionalEmail(body.emailTo), cleanHeader(body.emailSubject, 200), clean(body.emailBody, 5000), JSON.stringify(variables)).run();
   await env.PORTAL_DB.prepare("INSERT INTO portal_document_links (id,document_id,token,token_hash,expires_at,created_at,created_by) VALUES (?,?,?,?,?,?,?)")
     .bind(crypto.randomUUID(), id, token, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), now.toISOString(), user.id).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
@@ -229,7 +239,7 @@ async function previewDocument(request, env) {
   if (context.error) return json({ error: context.error }, context.status);
   const content = body.content ? String(body.content).slice(0, 100000) : context.template.content;
   const name = clean(body.name, 160) || context.template.name;
-  const pdf = await buildTemplatePdf(env, name, renderTemplate(content, context.record));
+  const pdf = await buildTemplatePdf(env, name, renderTemplate(content, context.record, sanitizeVariables(body.variables)));
   return new Response(pdf, { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename=\"${safeFilename(name)}.pdf\"`, "cache-control": "no-store" } });
 }
 
@@ -358,9 +368,10 @@ function wrapPdfText(text, font, size, width) {
   return lines;
 }
 
-function renderTemplate(content, record) {
+function renderTemplate(content, record, customVariables = {}) {
   const fallback = "____________________________";
   const values = {
+    ...customVariables,
     cliente_nombre: record.full_name || fallback,
     cliente_identificacion: record.identification || fallback,
     cliente_correo: record.email || fallback,
@@ -370,7 +381,17 @@ function renderTemplate(content, record) {
     caso_descripcion: record.description || record.title || fallback,
     fecha_larga: new Intl.DateTimeFormat("es-CO", { dateStyle: "long", timeZone: "America/Bogota" }).format(new Date()),
   };
-  return String(content || "").replace(/\{\{([a-z_]+)\}\}/g, (_, key) => values[key] ?? fallback);
+  return String(content || "").replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, key) => values[key] || fallback);
+}
+
+function sanitizeVariables(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const variables = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = String(rawKey || "").trim().replace(/[{}]/g, "").slice(0, 200);
+    if (key) variables[key] = clean(rawValue, 10000);
+  }
+  return variables;
 }
 
 async function addSignature(original, signatureDataUrl, signer) {

@@ -3,6 +3,7 @@
   let activeTemplateId = null;
   let documentPage = 1;
   const DOCUMENT_PAGE_SIZE = 12;
+  const AUTOMATIC_VARIABLES = new Set(["cliente_nombre","cliente_identificacion","cliente_correo","cliente_telefono","caso_titulo","caso_referencia","caso_descripcion","fecha_larga"]);
   const authScreen = document.querySelector("#auth-screen");
   const app = document.querySelector("#portal-app");
   const authStatus = document.querySelector("#auth-status");
@@ -127,6 +128,7 @@
     form.elements.name.value = selected.name;
     form.elements.description.value = selected.description || "";
     form.elements.content.value = selected.content;
+    renderTemplateVariableList();
   }
 
   function renderSettings() {
@@ -143,6 +145,7 @@
     document.querySelector("#template-preview-client").innerHTML = `<option value="">Datos de ejemplo</option>` + state.clients.map(item => `<option value="${item.id}">${esc(item.full_name)}</option>`).join("");
     document.querySelector("#document-template").innerHTML = (state.templates || []).map(item => `<option value="${item.id}">${esc(item.name)}</option>`).join("");
     updateDocumentCases();
+    renderDocumentVariableFields();
   }
 
   document.querySelector("#login-form").addEventListener("submit", async event => {
@@ -174,6 +177,7 @@
   });
 
   document.querySelector("#document-client").addEventListener("change", updateDocumentCases);
+  document.querySelector("#document-template").addEventListener("change", renderDocumentVariableFields);
 
   document.querySelector("#clients-list").addEventListener("click", event => {
     const button = event.target.closest("[data-client-document]");
@@ -200,6 +204,17 @@
     } catch (error) { setStatus(globalStatus, error.message); }
   });
 
+  document.querySelector("#template-editor textarea[name=content]").addEventListener("input", renderTemplateVariableList);
+  document.querySelector("#insert-template-variable").addEventListener("click", () => {
+    const input = document.querySelector("#template-variable-name");
+    const key = variableKey(input.value);
+    if (!key) return;
+    const textarea = document.querySelector("#template-editor textarea[name=content]");
+    const token = `{{${key}}}`; const start = textarea.selectionStart; const end = textarea.selectionEnd;
+    textarea.setRangeText(token, start, end, "end");
+    textarea.focus(); input.value = ""; renderTemplateVariableList();
+  });
+
   document.querySelector("#preview-template").addEventListener("click", () => {
     const form = document.querySelector("#template-editor");
     previewPdf({ templateId: form.elements.templateId.value, name: form.elements.name.value, content: form.elements.content.value, clientId: document.querySelector("#template-preview-client").value });
@@ -207,7 +222,7 @@
 
   document.querySelector("#preview-document").addEventListener("click", () => {
     const form = document.querySelector("#document-dialog form");
-    previewPdf(Object.fromEntries(new FormData(form)));
+    previewPdf(documentFormData(form));
   });
 
   function updateDocumentCases() {
@@ -216,11 +231,47 @@
     document.querySelector("#document-case").innerHTML = `<option value="">Sin caso asociado</option>` + options.map(item => `<option value="${item.id}">${esc(item.title)}</option>`).join("");
   }
 
+  function renderDocumentVariableFields() {
+    const template = state.templates.find(item => item.id === document.querySelector("#document-template").value);
+    const variables = extractVariables(template?.content || "");
+    let builtinVisible = false;
+    document.querySelectorAll("[data-builtin-variable]").forEach(label => {
+      const visible = variables.includes(label.dataset.builtinVariable);
+      label.hidden = !visible; if (visible) builtinVisible = true; else label.querySelector("input,textarea").value = "";
+    });
+    document.querySelector("#builtin-document-data").hidden = !builtinVisible;
+    const custom = variables.filter(key => !AUTOMATIC_VARIABLES.has(key));
+    document.querySelector("#custom-variable-fields").innerHTML = custom.map(key => `<label>${esc(variableLabel(key))}<input data-variable-key="${esc(key)}" placeholder="Valor para {{${esc(key)}}}" /></label>`).join("");
+    document.querySelector("#custom-template-variables").hidden = custom.length === 0;
+  }
+
+  function renderTemplateVariableList() {
+    const content = document.querySelector("#template-editor textarea[name=content]").value;
+    const variables = extractVariables(content);
+    document.querySelector("#template-variable-list").innerHTML = variables.length ? variables.map(key => `<code>{{${esc(key)}}}</code>`).join("") : `<span>Esta plantilla aún no contiene variables.</span>`;
+  }
+
+  function documentFormData(form) {
+    const data = Object.fromEntries(new FormData(form)); const variables = {};
+    form.querySelectorAll("[data-variable-key]").forEach(input => { variables[input.dataset.variableKey] = input.value; });
+    data.variables = variables; return data;
+  }
+
+  function extractVariables(content) {
+    const variables = []; const seen = new Set(); const pattern = /\{\{\s*([^{}]+?)\s*\}\}/g; let match;
+    while ((match = pattern.exec(content))) { const key = match[1].trim(); if (key && !seen.has(key)) { seen.add(key); variables.push(key); } }
+    return variables;
+  }
+
+  function variableKey(value) { return String(value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""); }
+  function variableLabel(key) { const value = String(key).replace(/[_-]+/g, " "); return value.charAt(0).toUpperCase() + value.slice(1); }
+
   document.querySelectorAll("dialog form[data-action]").forEach(form => form.addEventListener("submit", async event => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(form)); data.action = form.dataset.action; data.origin = location.origin;
+    const data = form.dataset.action === "document.create" ? documentFormData(form) : Object.fromEntries(new FormData(form)); data.action = form.dataset.action; data.origin = location.origin;
     try {
       const result = await api("/api/portal/actions", { method:"POST", body:JSON.stringify(data) });
+      if (form.dataset.action === "template.create" && result.id) activeTemplateId = result.id;
       form.closest("dialog").close(); form.reset();
       if (result.signingUrl) await shareSigningLink(result.signingUrl);
       await refresh(result.signingUrl ? "Documento generado. El enlace quedó listo para compartir." : "Cambios guardados.");
