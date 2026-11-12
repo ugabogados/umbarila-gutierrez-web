@@ -12,7 +12,7 @@ export default {
       const url = new URL(request.url);
       if (url.pathname === "/portal") return Response.redirect(`${url.origin}/portal/`, 308);
       if (url.pathname.startsWith("/firmar/")) {
-        return env.ASSETS.fetch(new Request(`${url.origin}/portal/firma.html`, request));
+        return env.ASSETS.fetch(new Request(`${url.origin}/portal/firma`, request));
       }
       if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
       return env.ASSETS.fetch(request);
@@ -113,15 +113,16 @@ async function snapshot(env, user) {
   await ensureTemplates(env);
   await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='expired',updated_at=? WHERE status='pending' AND expires_at<=?")
     .bind(new Date().toISOString(), new Date().toISOString()).run();
-  const [clients, stages, cases, documents, users, templates] = await Promise.all([
+  const [clients, stages, cases, documents, users, templates, documentLinks] = await Promise.all([
     env.PORTAL_DB.prepare("SELECT * FROM portal_clients ORDER BY updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT * FROM portal_stages WHERE active=1 ORDER BY position").all(),
     env.PORTAL_DB.prepare("SELECT c.*,cl.full_name AS client_name,s.name AS stage_name FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id JOIN portal_stages s ON s.id=c.stage_id ORDER BY c.updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT d.*,cl.full_name AS client_name,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id ORDER BY d.updated_at DESC").all(),
     user.role === "admin" ? env.PORTAL_DB.prepare("SELECT id,email,name,role,active,created_at FROM portal_users ORDER BY name").all() : Promise.resolve({ results: [] }),
     env.PORTAL_DB.prepare("SELECT id,name,description,content,active,updated_at FROM portal_templates WHERE active=1 ORDER BY name").all(),
+    env.PORTAL_DB.prepare("SELECT id,document_id,token,expires_at,created_at,revoked_at,used_at FROM portal_document_links ORDER BY created_at DESC").all(),
   ]);
-  return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, users: users.results, templates: templates.results });
+  return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, documentLinks: documentLinks.results, users: users.results, templates: templates.results });
 }
 
 async function actions(request, env, user) {
@@ -180,8 +181,12 @@ async function actions(request, env, user) {
     const document = await env.PORTAL_DB.prepare("SELECT id,status FROM portal_documents WHERE id=?").bind(body.documentId).first();
     if (!document) return json({ error: "No se encontró el documento." }, 404);
     const token = randomToken(32); const expiresAt = new Date(Date.now() + SIGNING_DAYS * 86400000).toISOString();
+    await env.PORTAL_DB.prepare("UPDATE portal_document_links SET revoked_at=? WHERE document_id=? AND revoked_at IS NULL")
+      .bind(now, document.id).run();
     await env.PORTAL_DB.prepare("UPDATE portal_documents SET signing_token=?,signing_token_hash=?,expires_at=?,status=CASE WHEN status='expired' THEN 'pending' ELSE status END,updated_at=? WHERE id=?")
       .bind(token, await sha256(token), expiresAt, now, document.id).run();
+    await env.PORTAL_DB.prepare("INSERT INTO portal_document_links (id,document_id,token,token_hash,expires_at,created_at,created_by) VALUES (?,?,?,?,?,?,?)")
+      .bind(crypto.randomUUID(), document.id, token, await sha256(token), expiresAt, now, user.id).run();
     await audit(env, document.id, user.id, "document.link.regenerated", "Enlace de firma regenerado");
     const base = String(env.PUBLIC_ORIGIN || "https://ugabogados.com").replace(/\/$/, "");
     return json({ ok: true, signingUrl: `${base}/firmar/${token}` });
@@ -202,6 +207,8 @@ async function createDocument(env, user, body) {
   await putFile(env, unsignedKey, pdf, "application/pdf");
   await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token).run();
+  await env.PORTAL_DB.prepare("INSERT INTO portal_document_links (id,document_id,token,token_hash,expires_at,created_at,created_by) VALUES (?,?,?,?,?,?,?)")
+    .bind(crypto.randomUUID(), id, token, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), now.toISOString(), user.id).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
   const base = String(env.PUBLIC_ORIGIN || new URL(body.origin || "https://ugabogados.com").origin).replace(/\/$/, "");
   return json({ ok: true, id, signingUrl: `${base}/firmar/${token}` }, 201);
@@ -243,8 +250,8 @@ async function internalDocument(env, id) {
 
 async function signingApi(request, env, token, suffix) {
   const tokenHash = await sha256(token);
-  const doc = await env.PORTAL_DB.prepare("SELECT d.*,cl.full_name,cl.identification,cl.email,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE d.signing_token_hash=?").bind(tokenHash).first();
-  if (!doc || new Date(doc.expires_at) <= new Date()) return json({ error: "Este enlace no está disponible o venció." }, 404);
+  const doc = await env.PORTAL_DB.prepare("SELECT d.*,l.id AS link_id,l.expires_at AS link_expires_at,cl.full_name,cl.identification,cl.email,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_document_links l JOIN portal_documents d ON d.id=l.document_id JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE l.token_hash=? AND l.revoked_at IS NULL").bind(tokenHash).first();
+  if (!doc || new Date(doc.link_expires_at) <= new Date()) return json({ error: "Este enlace no está disponible o venció." }, 404);
   if (suffix === "file" && request.method === "GET") return storedFile(env, doc.signed_key || doc.unsigned_key, "documento-firmado.pdf");
   if (suffix === "email" && request.method === "GET") {
     if (!doc.signed_key) return json({ error: "El documento aún no ha sido firmado." }, 409);
@@ -267,6 +274,7 @@ async function signingApi(request, env, token, suffix) {
   await putFile(env, signedKey, signedPdf, "application/pdf", { sha256: pdfHash });
   await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='signed',signed_key=?,signer_name=?,signer_identification=?,signer_email=?,signed_at=?,pdf_hash=?,updated_at=? WHERE id=?")
     .bind(signedKey, clean(body.signerName, 140), clean(body.signerIdentification, 40), normalizeOptionalEmail(body.signerEmail), signedAt, pdfHash, signedAt, doc.id).run();
+  await env.PORTAL_DB.prepare("UPDATE portal_document_links SET used_at=? WHERE id=?").bind(signedAt, doc.link_id).run();
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
   await audit(env, doc.id, null, "document.signed", `Firmado por ${clean(body.signerName, 140)}`, await sha256(`${env.AUDIT_SALT || "ug"}:${ip}`));
   return json({ ok: true, signedAt });

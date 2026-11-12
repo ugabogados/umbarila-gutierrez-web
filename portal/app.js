@@ -1,5 +1,5 @@
 (() => {
-  const state = { user: null, clients: [], stages: [], cases: [], documents: [], templates: [], users: [] };
+  const state = { user: null, clients: [], stages: [], cases: [], documents: [], documentLinks: [], templates: [], users: [] };
   let activeTemplateId = null;
   const authScreen = document.querySelector("#auth-screen");
   const app = document.querySelector("#portal-app");
@@ -79,16 +79,19 @@
   }
 
   function renderClients() {
-    document.querySelector("#clients-list").innerHTML = state.clients.map(item => `<article class="client-card"><h3>${esc(item.full_name)}</h3><p>${esc(item.identification || "Sin identificación")}</p><p>${esc(item.email || "Sin correo")}</p><p>${esc(item.phone || "Sin teléfono")}</p></article>`).join("") || empty("Aún no hay clientes registrados.");
+    document.querySelector("#clients-list").innerHTML = state.clients.map(item => {
+      const documents = state.documents.filter(document => document.client_id === item.id);
+      return `<article class="client-card"><div class="client-head"><div><h3>${esc(item.full_name)}</h3><p>${esc(item.identification || "Sin identificación")}</p></div><span class="badge">${documents.length} documento${documents.length === 1 ? "" : "s"}</span></div><p>${esc(item.email || "Sin correo")}</p><p>${esc(item.phone || "Sin teléfono")}</p><button class="secondary client-document-button" type="button" data-client-document="${item.id}">Generar documento</button><div class="client-documents"><strong>Documentos relacionados</strong>${documents.length ? documents.map(document => `<div class="client-document"><div><span>${esc(document.title)}</span><small>${esc(formatDate(document.created_at))}</small></div><span class="badge ${document.status}">${documentStatus(document.status)}</span><a href="/api/portal/documents/${document.id}/file">Descargar</a></div>`).join("") : `<small>Aún no hay documentos para este cliente.</small>`}</div></article>`;
+    }).join("") || empty("Aún no hay clientes registrados.");
   }
 
   function renderDocuments() {
     document.querySelector("#documents-list").innerHTML = state.documents.map(item => {
-      const labels = { pending:"Sin firmar", signed:"Firmado", expired:"Enlace vencido" };
+      const links = (state.documentLinks || []).filter(link => link.document_id === item.id);
       const signingUrl = item.signing_token ? `${location.origin}/firmar/${item.signing_token}` : "";
       const activeLink = signingUrl && item.status !== "expired";
       const expiry = item.expires_at ? new Intl.DateTimeFormat("es-CO", { dateStyle:"medium" }).format(new Date(item.expires_at)) : "";
-      return `<article class="list-row document-row"><div class="document-info"><strong>${esc(item.title)}</strong><small>${esc(item.client_name)} · ${esc(item.case_title)}</small><small>${item.status === "signed" && item.signed_at ? `Firmado el ${esc(formatDate(item.signed_at))}` : `Enlace vigente hasta ${esc(expiry)}`}</small>${activeLink ? `<div class="generated-link"><span>${esc(signingUrl)}</span></div>` : ""}</div><div class="row-actions"><span class="badge ${item.status}">${labels[item.status] || "Sin firmar"}</span><a href="/api/portal/documents/${item.id}/file">Descargar</a>${activeLink ? `<a href="${esc(signingUrl)}" target="_blank" rel="noopener">Abrir enlace</a><button type="button" data-copy-signing="${esc(signingUrl)}">Copiar</button><a href="https://wa.me/?text=${encodeURIComponent(`Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${signingUrl}`)}" target="_blank" rel="noopener">WhatsApp</a>` : `<button type="button" data-regenerate-link="${item.id}">Generar nuevo enlace</button>`}</div></article>`;
+      return `<article class="list-row document-row"><div class="document-info"><strong>${esc(item.title)}</strong><small>Cliente: ${esc(item.client_name)} · ${esc(item.case_title)}</small><small>${item.status === "signed" && item.signed_at ? `Firmado el ${esc(formatDate(item.signed_at))}` : `Creado el ${esc(formatDate(item.created_at))} · Enlace vigente hasta ${esc(expiry)}`}</small>${activeLink ? `<div class="generated-link"><span>${esc(signingUrl)}</span></div>` : ""}<details class="link-history"><summary>Historial de enlaces (${links.length})</summary>${links.map(link => `<div><span>${link.used_at ? "Usado para firmar" : link.revoked_at ? "Reemplazado" : new Date(link.expires_at) <= new Date() ? "Vencido" : "Activo"}</span><small>${esc(formatDate(link.created_at))}</small></div>`).join("") || `<small>Sin enlaces registrados.</small>`}</details></div><div class="row-actions"><span class="badge ${item.status}">${documentStatus(item.status)}</span><a href="/api/portal/documents/${item.id}/file">Descargar</a>${activeLink ? `<a href="${esc(signingUrl)}" target="_blank" rel="noopener">Abrir enlace</a><button type="button" data-copy-signing="${esc(signingUrl)}">Copiar</button><a href="https://wa.me/?text=${encodeURIComponent(`Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${signingUrl}`)}" target="_blank" rel="noopener">WhatsApp</a>` : `<button type="button" data-regenerate-link="${item.id}">Generar nuevo enlace</button>`}</div></article>`;
     }).join("") || empty("Aún no se han generado documentos.");
   }
 
@@ -156,6 +159,14 @@
   });
 
   document.querySelector("#document-client").addEventListener("change", updateDocumentCases);
+
+  document.querySelector("#clients-list").addEventListener("click", event => {
+    const button = event.target.closest("[data-client-document]");
+    if (!button) return;
+    document.querySelector("#document-client").value = button.dataset.clientDocument;
+    updateDocumentCases();
+    document.querySelector("#document-dialog").showModal();
+  });
 
   document.querySelector("#templates-list").addEventListener("click", event => {
     const option = event.target.closest("[data-template-id]");
@@ -248,6 +259,7 @@
   function setStatus(element, message, success=false) { element.textContent=message; element.classList.toggle("success", success); if (message) setTimeout(()=>{ if(element.textContent===message) element.textContent=""; },5000); }
   function empty(message) { return `<p class="muted">${esc(message)}</p>`; }
   function formatDate(value) { return new Intl.DateTimeFormat("es-CO", { dateStyle:"medium", timeStyle:"short" }).format(new Date(value)); }
+  function documentStatus(status) { return ({ pending:"Sin firmar", signed:"Firmado", expired:"Enlace vencido" })[status] || "Sin firmar"; }
   function esc(value) { return String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char])); }
   boot();
 })();

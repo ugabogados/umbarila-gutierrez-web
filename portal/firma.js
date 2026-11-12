@@ -22,6 +22,7 @@
       loading.hidden = true;
       if (data.status === "signed") return showSigned();
       signing.hidden = false;
+      document.querySelector("#document-title").textContent = data.title || "Documento para firma";
       document.querySelector('[name="signerName"]').value = data.clientName || "";
       document.querySelector('[name="signerIdentification"]').value = data.identification || "";
       document.querySelector('[name="signerEmail"]').value = data.email || "";
@@ -34,7 +35,7 @@
   }
 
   function prepareCanvas() {
-    context.lineWidth = 5; context.lineCap = "round"; context.lineJoin = "round"; context.strokeStyle = "#011b36";
+    context.lineWidth = 7; context.lineCap = "round"; context.lineJoin = "round"; context.strokeStyle = "#011b36";
     const point = event => { const rect=canvas.getBoundingClientRect(); const source=event.touches?.[0] || event; return { x:(source.clientX-rect.left)*(canvas.width/rect.width), y:(source.clientY-rect.top)*(canvas.height/rect.height) }; };
     const start = event => { event.preventDefault(); drawing=true; hasSignature=true; const p=point(event); context.beginPath(); context.moveTo(p.x,p.y); };
     const move = event => { if(!drawing) return; event.preventDefault(); const p=point(event); context.lineTo(p.x,p.y); context.stroke(); };
@@ -46,10 +47,10 @@
   document.querySelector("#sign-form").addEventListener("submit", async event => {
     event.preventDefault(); const status=document.querySelector("#sign-status");
     if(!hasSignature){ status.textContent="Dibuja tu firma dentro del recuadro."; return; }
-    const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; status.textContent="Guardando tu documento…";
+    const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.textContent="Guardando firma…"; status.textContent="Estamos incorporando tu firma al documento. No cierres esta ventana.";
     const data=Object.fromEntries(new FormData(event.currentTarget)); data.consent=true; data.signature=canvas.toDataURL("image/png");
     try { await api(`/api/sign/${encodeURIComponent(token)}`, { method:"POST", body:JSON.stringify(data) }); signing.hidden=true; showSigned(); }
-    catch(error){ status.textContent=error.message; button.disabled=false; }
+    catch(error){ status.textContent=error.message; button.disabled=false; button.textContent="Confirmar y firmar documento"; }
   });
 
   function showSigned(){ loading.hidden=true; signed.hidden=false; document.querySelector("#download-signed").href=`/api/sign/${encodeURIComponent(token)}/file`; document.querySelector("#prepare-email").href=`/api/sign/${encodeURIComponent(token)}/email`; }
