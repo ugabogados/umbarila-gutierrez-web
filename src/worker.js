@@ -11,7 +11,7 @@ export default {
     try {
       const url = new URL(request.url);
       if (url.pathname === "/portal") return Response.redirect(`${url.origin}/portal/`, 308);
-      if (url.pathname.startsWith("/firmar/")) {
+      if (url.pathname.startsWith("/firmar/") || url.pathname.startsWith("/f/")) {
         return env.ASSETS.fetch(new Request(`${url.origin}/portal/firma`, request));
       }
       if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
@@ -180,7 +180,7 @@ async function actions(request, env, user) {
   if (body.action === "document.link.regenerate") {
     const document = await env.PORTAL_DB.prepare("SELECT id,status FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(body.documentId).first();
     if (!document) return json({ error: "No se encontró el documento." }, 404);
-    const token = randomToken(32); const expiresAt = new Date(Date.now() + SIGNING_DAYS * 86400000).toISOString();
+    const token = randomToken(9); const expiresAt = new Date(Date.now() + SIGNING_DAYS * 86400000).toISOString();
     await env.PORTAL_DB.prepare("UPDATE portal_document_links SET revoked_at=? WHERE document_id=? AND revoked_at IS NULL")
       .bind(now, document.id).run();
     await env.PORTAL_DB.prepare("UPDATE portal_documents SET signing_token=?,signing_token_hash=?,expires_at=?,status=CASE WHEN status='expired' THEN 'pending' ELSE status END,updated_at=? WHERE id=?")
@@ -189,7 +189,7 @@ async function actions(request, env, user) {
       .bind(crypto.randomUUID(), document.id, token, await sha256(token), expiresAt, now, user.id).run();
     await audit(env, document.id, user.id, "document.link.regenerated", "Enlace de firma regenerado");
     const base = String(env.PUBLIC_ORIGIN || "https://ugabogados.com").replace(/\/$/, "");
-    return json({ ok: true, signingUrl: `${base}/firmar/${token}` });
+    return json({ ok: true, signingUrl: `${base}/f/${token}` });
   }
   if (body.action === "document.delete") {
     const document = await env.PORTAL_DB.prepare("SELECT id,title FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(body.documentId).first();
@@ -208,7 +208,7 @@ async function createDocument(env, user, body) {
   const context = await documentContext(env, body);
   if (context.error) return json({ error: context.error }, context.status);
   const { record, template } = context;
-  const id = crypto.randomUUID(); const token = randomToken(32); const now = new Date();
+  const id = crypto.randomUUID(); const token = randomToken(9); const now = new Date();
   const renderedContent = renderTemplate(template.content, record);
   const pdf = await buildTemplatePdf(env, template.name, renderedContent);
   const unsignedKey = `documents/${id}/original.pdf`;
@@ -219,7 +219,7 @@ async function createDocument(env, user, body) {
     .bind(crypto.randomUUID(), id, token, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), now.toISOString(), user.id).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
   const base = String(env.PUBLIC_ORIGIN || new URL(body.origin || "https://ugabogados.com").origin).replace(/\/$/, "");
-  return json({ ok: true, id, signingUrl: `${base}/firmar/${token}` }, 201);
+  return json({ ok: true, id, signingUrl: `${base}/f/${token}` }, 201);
 }
 
 async function previewDocument(request, env) {
@@ -256,14 +256,14 @@ async function documentContext(env, body, allowSample = false) {
 async function internalDocument(env, id) {
   const row = await env.PORTAL_DB.prepare("SELECT signed_key,unsigned_key,title FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(id).first();
   if (!row) return json({ error: "Documento no encontrado." }, 404);
-  return storedFile(env, row.signed_key || row.unsigned_key, `${safeFilename(row.title)}.pdf`);
+  return storedFile(env, row.signed_key || row.unsigned_key, `${safeFilename(row.title)}.pdf`, "inline");
 }
 
 async function signingApi(request, env, token, suffix) {
   const tokenHash = await sha256(token);
   const doc = await env.PORTAL_DB.prepare("SELECT d.*,l.id AS link_id,l.expires_at AS link_expires_at,cl.full_name,cl.identification,cl.email,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_document_links l JOIN portal_documents d ON d.id=l.document_id JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE l.token_hash=? AND l.revoked_at IS NULL AND d.deleted_at IS NULL").bind(tokenHash).first();
   if (!doc || new Date(doc.link_expires_at) <= new Date()) return json({ error: "Este enlace no está disponible o venció." }, 404);
-  if (suffix === "file" && request.method === "GET") return storedFile(env, doc.signed_key || doc.unsigned_key, "documento-firmado.pdf");
+  if (suffix === "file" && request.method === "GET") return storedFile(env, doc.signed_key || doc.unsigned_key, "documento-firmado.pdf", "inline");
   if (suffix === "email" && request.method === "GET") {
     if (!doc.signed_key) return json({ error: "El documento aún no ha sido firmado." }, 409);
     const object = await getFile(env, doc.signed_key); const bytes = new Uint8Array(object.data);
@@ -423,10 +423,10 @@ async function getFile(env, key) {
   return env.PORTAL_DB.prepare("SELECT data,content_type,metadata FROM portal_files WHERE key=?").bind(key).first();
 }
 
-async function storedFile(env, key, filename) {
+async function storedFile(env, key, filename, disposition = "attachment") {
   if (!key) return json({ error: "Archivo no disponible." }, 404);
   const object = await getFile(env, key); if (!object) return json({ error: "Archivo no encontrado." }, 404);
-  return new Response(new Uint8Array(object.data), { headers: { "content-type": object.content_type, "content-disposition": `attachment; filename=\"${filename}\"`, "cache-control": "no-store" } });
+  return new Response(new Uint8Array(object.data), { headers: { "content-type": object.content_type, "content-disposition": `${disposition}; filename=\"${filename}\"`, "cache-control": "no-store" } });
 }
 
 async function audit(env, documentId, userId, event, detail, ipHash = null) {
