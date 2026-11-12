@@ -421,12 +421,20 @@ async function buildTemplatePdf(env, title, content, backgroundKey = null) {
         y -= 105;
         continue;
       }
+      if (block.tag === "blank") {
+        const lineHeight = compact ? 11.7 : 13.5;
+        for (let index=0; index<block.blankLines; index++) {
+          if (y - lineHeight < 76) addPage();
+          y -= lineHeight;
+        }
+        continue;
+      }
       const heading = /^h[1-3]$/.test(block.tag);
       const size = block.tag === "h1" ? 15 : block.tag === "h2" ? 13 : block.tag === "h3" ? 11.5 : (compact ? 9.1 : 9.7);
       const lines = wrapRichRuns(block.runs, run => fontFor(run, heading), run => richFontSize(run, size), 452);
       if (!lines.length) { y -= heading ? size * 1.35 : (compact ? 11.7 : 13.5); continue; }
       for (const line of lines) {
-        const lineSize = Math.max(...line.map(segment => segment.size), size);
+        const lineSize = line.length ? Math.max(...line.map(segment => segment.size), size) : size;
         const lineHeight = heading ? lineSize * 1.35 : lineSize * (compact ? 1.28 : 1.4);
         if (y - lineHeight < 76) addPage();
         const lineWidth = line.reduce((total, segment) => total + segment.width, 0);
@@ -494,6 +502,7 @@ function parseRichText(html) {
     if (!current) return;
     current.runs = current.runs.filter(run => run.text).map(run => ({ ...run, text:run.text.replace(/[ \t]+/g, " ") }));
     if (current.runs.some(run => run.text.trim())) blocks.push(current);
+    else if (["p","div"].includes(current.tag)) blocks.push({ ...current, tag:"blank", blankLines:Math.max(1, current.runs.reduce((total, run) => total + (run.text.match(/\n/g)?.length || 0), 0)) });
     current = null;
   };
   const start = (tag, rawTag = "") => {
@@ -514,6 +523,7 @@ function parseRichText(html) {
     }
     const decoded = decodeHtmlEntities(text).replace(/\r?\n/g, " ");
     if (!decoded) return;
+    if (!current && !decoded.trim()) return;
     if (!current) start("p");
     current.runs.push({ text:decoded, bold:style.bold > 0, italic:style.italic > 0, underline:style.underline > 0, family:style.families.at(-1) || "", size:style.sizes.at(-1) || "" });
   };
@@ -559,13 +569,13 @@ function richFontSize(run, fallback) {
 
 function wrapRichRuns(runs, fontFor, sizeFor, width) {
   const lines = []; let line = []; let lineWidth = 0; let pendingSpace = false;
-  const pushLine = () => { if (line.length) lines.push(line); line = []; lineWidth = 0; pendingSpace = false; };
+  const pushLine = (preserveEmpty = false) => { if (line.length || preserveEmpty) lines.push(line); line = []; lineWidth = 0; pendingSpace = false; };
   for (const run of runs) {
     const font = fontFor(run);
     const size = sizeFor(run);
     for (const token of run.text.split(/(\n|\s+)/)) {
       if (!token) continue;
-      if (token === "\n") { pushLine(); continue; }
+      if (token === "\n") { pushLine(true); continue; }
       if (/^\s+$/.test(token)) { pendingSpace = line.length > 0; continue; }
       const prefix = pendingSpace && line.length ? " " : "";
       let value = prefix + token; let tokenWidth = font.widthOfTextAtSize(value, size);

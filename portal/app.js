@@ -159,6 +159,7 @@
     document.querySelector("#remove-template-background").disabled = !selected.background_key;
     const editor = document.querySelector("#template-rich-editor");
     editor.innerHTML = sanitizeTemplateHtml(looksLikeHtml(selected.content) ? selected.content : plainToEditorHtml(selected.content));
+    decorateVariableTokens(editor);
     syncRichEditor();
     renderTemplateVariableList();
   }
@@ -342,7 +343,7 @@
   }
 
   function renderTemplateVariableList() {
-    const content = document.querySelector("#template-rich-editor").textContent;
+    const content = document.querySelector("#template-editor textarea[name=content]").value;
     const used = new Set(extractVariables(content));
     const automatic = [...AUTOMATIC_VARIABLES];
     const custom = [...new Set([...extractVariables(content), ...(state.templates || []).flatMap(template => extractVariables(template.content || ""))].filter(key => !AUTOMATIC_VARIABLES.has(key)))];
@@ -368,12 +369,24 @@
   }
 
   function insertVariable(key, range = null) {
-    const token = `{{${key}}}`; const selection = window.getSelection();
+    const selection = window.getSelection();
     richEditor.focus(); selection.removeAllRanges();
     const target = range || savedEditorRange;
     if (target && richEditor.contains(target.commonAncestorContainer)) selection.addRange(target);
     else { const end = document.createRange(); end.selectNodeContents(richEditor); end.collapse(false); selection.addRange(end); }
-    if (!document.execCommand("insertText", false, token)) selection.getRangeAt(0).insertNode(document.createTextNode(token));
+    const token = document.createElement("span");
+    token.className = "variable-token";
+    token.dataset.variableToken = "true";
+    token.dataset.variableKey = key;
+    token.contentEditable = "false";
+    token.textContent = variableLabel(key);
+    const activeRange = selection.getRangeAt(0);
+    activeRange.deleteContents();
+    activeRange.insertNode(document.createTextNode("\u00a0"));
+    activeRange.insertNode(token);
+    activeRange.setStartAfter(token.nextSibling);
+    activeRange.collapse(true);
+    selection.removeAllRanges(); selection.addRange(activeRange);
     rememberEditorRange(); syncRichEditor();
   }
 
@@ -397,7 +410,7 @@
 
   function syncRichEditor() {
     const editor = document.querySelector("#template-rich-editor");
-    const content = sanitizeTemplateHtml(editor.innerHTML);
+    const content = serializeEditorContent(editor);
     document.querySelector("#template-editor textarea[name=content]").value = content;
     renderTemplateVariableList();
     scheduleTemplatePreview();
@@ -464,7 +477,37 @@
   function looksLikeHtml(content) { return /<(p|div|h[1-3]|ul|ol|li|strong|b|em|i|u|br)\b/i.test(String(content || "")); }
 
   function plainToEditorHtml(content) {
-    return String(content || "").replace(/\r/g, "").split(/\n{2,}/).map(block => `<p>${esc(block).replace(/\n/g, "<br>")}</p>`).join("");
+    const parts = String(content || "").replace(/\r/g, "").split(/(\n{2,})/);
+    return parts.map(part => {
+      if (/^\n{2,}$/.test(part)) return "<p><br></p>".repeat(Math.max(0, part.length - 2));
+      return part ? `<p>${esc(part).replace(/\n/g, "<br>")}</p>` : "";
+    }).join("");
+  }
+
+  function serializeEditorContent(editor) {
+    const clone = editor.cloneNode(true);
+    clone.querySelectorAll("[data-variable-token='true']").forEach(token => token.replaceWith(document.createTextNode(`{{${token.dataset.variableKey}}}`)));
+    return sanitizeTemplateHtml(clone.innerHTML);
+  }
+
+  function decorateVariableTokens(editor) {
+    const textNodes = [];
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) if (!walker.currentNode.parentElement?.closest("[data-variable-token], [data-signature-marker]")) textNodes.push(walker.currentNode);
+    const pattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
+    textNodes.forEach(node => {
+      const text = node.nodeValue || ""; let match; let offset = 0; const fragment = document.createDocumentFragment(); let found = false;
+      while ((match = pattern.exec(text))) {
+        found = true;
+        if (match.index > offset) fragment.append(document.createTextNode(text.slice(offset, match.index)));
+        const key = match[1].trim(); const token = document.createElement("span");
+        token.className = "variable-token"; token.dataset.variableToken = "true"; token.dataset.variableKey = key; token.contentEditable = "false"; token.textContent = variableLabel(key);
+        fragment.append(token); offset = pattern.lastIndex;
+      }
+      if (!found) return;
+      if (offset < text.length) fragment.append(document.createTextNode(text.slice(offset)));
+      node.replaceWith(fragment);
+    });
   }
 
   function sanitizeTemplateHtml(html) {
