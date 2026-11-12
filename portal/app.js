@@ -96,10 +96,10 @@
   function fillSelects() {
     const clientOptions = `<option value="">Selecciona un cliente</option>` + state.clients.map(item => `<option value="${item.id}">${esc(item.full_name)}</option>`).join("");
     const stageOptions = state.stages.map(item => `<option value="${item.id}">${esc(item.name)}</option>`).join("");
-    const caseOptions = `<option value="">Selecciona un caso</option>` + state.cases.map(item => `<option value="${item.id}">${esc(item.client_name)} · ${esc(item.title)}</option>`).join("");
     document.querySelector("#case-client").innerHTML = clientOptions;
     document.querySelector("#case-stage").innerHTML = stageOptions;
-    document.querySelector("#document-case").innerHTML = caseOptions;
+    document.querySelector("#document-client").innerHTML = clientOptions;
+    updateDocumentCases();
   }
 
   document.querySelector("#login-form").addEventListener("submit", async event => {
@@ -127,7 +127,16 @@
 
   document.addEventListener("click", event => {
     const opener = event.target.closest("[data-open]"); if (opener) document.querySelector(`#${opener.dataset.open}`).showModal();
+    const closer = event.target.closest("[data-close-dialog]"); if (closer) closer.closest("dialog").close();
   });
+
+  document.querySelector("#document-client").addEventListener("change", updateDocumentCases);
+
+  function updateDocumentCases() {
+    const clientId = document.querySelector("#document-client").value;
+    const options = state.cases.filter(item => !clientId || item.client_id === clientId);
+    document.querySelector("#document-case").innerHTML = `<option value="">Sin caso asociado</option>` + options.map(item => `<option value="${item.id}">${esc(item.title)}</option>`).join("");
+  }
 
   document.querySelectorAll("dialog form[data-action]").forEach(form => form.addEventListener("submit", async event => {
     event.preventDefault();

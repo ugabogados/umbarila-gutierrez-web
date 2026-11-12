@@ -112,7 +112,7 @@ async function snapshot(env, user) {
     env.PORTAL_DB.prepare("SELECT * FROM portal_clients ORDER BY updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT * FROM portal_stages WHERE active=1 ORDER BY position").all(),
     env.PORTAL_DB.prepare("SELECT c.*,cl.full_name AS client_name,s.name AS stage_name FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id JOIN portal_stages s ON s.id=c.stage_id ORDER BY c.updated_at DESC").all(),
-    env.PORTAL_DB.prepare("SELECT d.*,cl.full_name AS client_name,c.title AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id JOIN portal_cases c ON c.id=d.case_id ORDER BY d.updated_at DESC").all(),
+    env.PORTAL_DB.prepare("SELECT d.*,cl.full_name AS client_name,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id ORDER BY d.updated_at DESC").all(),
     user.role === "admin" ? env.PORTAL_DB.prepare("SELECT id,email,name,role,active,created_at FROM portal_users ORDER BY name").all() : Promise.resolve({ results: [] }),
   ]);
   return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, users: users.results });
@@ -166,15 +166,23 @@ async function actions(request, env, user) {
 }
 
 async function createDocument(env, user, body) {
-  const record = await env.PORTAL_DB.prepare("SELECT c.id,c.title,c.reference,cl.id AS client_id,cl.full_name,cl.identification,cl.email FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id WHERE c.id=?")
-    .bind(body.caseId).first();
-  if (!record) return json({ error: "No se encontró el caso." }, 404);
+  let record;
+  let caseId = clean(body.caseId, 80) || null;
+  if (caseId) {
+    record = await env.PORTAL_DB.prepare("SELECT c.id AS case_id,c.title,c.reference,cl.id AS client_id,cl.full_name,cl.identification,cl.email FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id WHERE c.id=?")
+      .bind(caseId).first();
+    if (!record) return json({ error: "No se encontró el caso seleccionado." }, 404);
+  } else {
+    record = await env.PORTAL_DB.prepare("SELECT id AS client_id,full_name,identification,email,NULL AS case_id,NULL AS title,NULL AS reference FROM portal_clients WHERE id=?")
+      .bind(body.clientId).first();
+    if (!record) return json({ error: "Selecciona un cliente para generar el documento." }, 400);
+  }
   const id = crypto.randomUUID(); const token = randomToken(32); const now = new Date();
   const pdf = await buildInstructionPdf(record);
   const unsignedKey = `documents/${id}/original.pdf`;
   await putFile(env, unsignedKey, pdf, "application/pdf");
   await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, record.id, record.client_id, "Instrucciones para otorgar poder — Ley 2213 de 2022", "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString()).run();
+    .bind(id, record.case_id, record.client_id, "Instrucciones para otorgar poder — Ley 2213 de 2022", "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString()).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
   const base = String(env.PUBLIC_ORIGIN || new URL(body.origin || "https://ugabogados.com").origin).replace(/\/$/, "");
   return json({ ok: true, id, signingUrl: `${base}/firmar/${token}` }, 201);
@@ -188,7 +196,7 @@ async function internalDocument(env, id) {
 
 async function signingApi(request, env, token, suffix) {
   const tokenHash = await sha256(token);
-  const doc = await env.PORTAL_DB.prepare("SELECT d.*,cl.full_name,cl.identification,cl.email,c.title AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id JOIN portal_cases c ON c.id=d.case_id WHERE d.signing_token_hash=?").bind(tokenHash).first();
+  const doc = await env.PORTAL_DB.prepare("SELECT d.*,cl.full_name,cl.identification,cl.email,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE d.signing_token_hash=?").bind(tokenHash).first();
   if (!doc || new Date(doc.expires_at) <= new Date()) return json({ error: "Este enlace no está disponible o venció." }, 404);
   if (suffix === "file" && request.method === "GET") return storedFile(env, doc.signed_key || doc.unsigned_key, "documento-firmado.pdf");
   if (suffix === "email" && request.method === "GET") {
