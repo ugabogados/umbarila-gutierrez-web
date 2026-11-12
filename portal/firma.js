@@ -21,7 +21,7 @@
     try {
       const data = await api(`/api/sign/${encodeURIComponent(token)}`);
       loading.hidden = true;
-      if (data.status === "signed") return showSigned();
+      if (data.status === "signed") return showSigned(false);
       signing.hidden = false;
       document.querySelector("#document-title").textContent = data.title || "Documento para firma";
       signerData = { name: data.clientName || "", identification: data.identification || "", email: data.email || "" };
@@ -50,10 +50,37 @@
     if(!hasSignature){ status.textContent="Dibuja tu firma dentro del recuadro."; return; }
     const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.textContent="Guardando firma…"; status.textContent="Estamos incorporando tu firma al documento. No cierres esta ventana.";
     const data={ consent:true, signerName:signerData.name, signerIdentification:signerData.identification, signerEmail:signerData.email, signature:canvas.toDataURL("image/png") };
-    try { await api(`/api/sign/${encodeURIComponent(token)}`, { method:"POST", body:JSON.stringify(data) }); signing.hidden=true; showSigned(); }
+    try { await api(`/api/sign/${encodeURIComponent(token)}`, { method:"POST", body:JSON.stringify(data) }); signing.hidden=true; showSigned(true); }
     catch(error){ status.textContent=error.message; button.disabled=false; button.textContent="Firmar documento"; }
   });
 
-  function showSigned(){ loading.hidden=true; signed.hidden=false; document.querySelector("#download-signed").href=`/api/sign/${encodeURIComponent(token)}/file`; document.querySelector("#prepare-email").href=`/api/sign/${encodeURIComponent(token)}/email`; }
+  function showSigned(autoShare=false){ loading.hidden=true; signed.hidden=false; document.querySelector("#download-signed").href=`/api/sign/${encodeURIComponent(token)}/file`; if(autoShare) shareSignedDocument(); }
+
+  async function shareSignedDocument() {
+    const status = document.querySelector("#email-status");
+    status.textContent = "Abriendo las opciones de envío del dispositivo…";
+    try {
+      const response = await fetch(`/api/sign/${encodeURIComponent(token)}/file`);
+      if (!response.ok) throw new Error("No fue posible preparar el documento firmado.");
+      const file = new File([await response.blob()], "documento-firmado.pdf", { type:"application/pdf" });
+      const shareData = { title:"Documento firmado", text:"Adjunto remito el documento debidamente firmado.", files:[file] };
+      if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
+        await navigator.share(shareData);
+        status.textContent = "Documento entregado a la aplicación seleccionada.";
+        return;
+      }
+      status.textContent = "Abriendo el correo preparado con el PDF adjunto…";
+      location.href = `/api/sign/${encodeURIComponent(token)}/email`;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        status.textContent = "Envío cancelado. Puedes intentarlo nuevamente con el botón.";
+        return;
+      }
+      status.textContent = "Abriendo el correo preparado con el PDF adjunto…";
+      location.href = `/api/sign/${encodeURIComponent(token)}/email`;
+    }
+  }
+
+  document.querySelector("#prepare-email").addEventListener("click", shareSignedDocument);
   boot();
 })();
