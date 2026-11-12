@@ -302,7 +302,7 @@ function validateAccount(body) {
 
 async function hashPassword(password, salt) {
   const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: encoder.encode(salt), iterations: 210000 }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: encoder.encode(salt), iterations: 100000 }, key, 256);
   return bytesToBase64(new Uint8Array(bits));
 }
 async function verifyPassword(password, salt, expected) { return constantTime(await hashPassword(password, salt), expected); }
