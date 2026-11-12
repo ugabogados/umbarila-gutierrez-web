@@ -132,19 +132,41 @@ async function actions(request, env, user) {
   const body = await readJson(request);
   const now = new Date().toISOString();
   if (body.action === "client.create") {
-    if (!clean(body.fullName, 140)) return json({ error: "Escribe el nombre del cliente." }, 400);
+    const fullName = clean(body.fullName, 140);
+    const identification = clean(body.identification, 40);
+    const identificationKey = uniqueRecordKey(identification);
+    if (!fullName) return json({ error: "Escribe el nombre del cliente." }, 400);
+    if (!identificationKey) return json({ error: "Escribe el documento de identidad del cliente." }, 400);
+    const existingClient = await env.PORTAL_DB.prepare("SELECT id,full_name FROM portal_clients WHERE identification_key=?").bind(identificationKey).first();
+    if (existingClient) return json({ error: `El documento de identidad ya pertenece a ${existingClient.full_name}.` }, 409);
     const id = crypto.randomUUID();
-    await env.PORTAL_DB.prepare("INSERT INTO portal_clients (id,full_name,identification,email,phone,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
-      .bind(id, clean(body.fullName, 140), clean(body.identification, 40), normalizeOptionalEmail(body.email), clean(body.phone, 40), clean(body.notes, 2000), now, now).run();
+    try {
+      await env.PORTAL_DB.prepare("INSERT INTO portal_clients (id,full_name,identification,identification_key,email,phone,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+        .bind(id, fullName, identification, identificationKey, normalizeOptionalEmail(body.email), clean(body.phone, 40), clean(body.notes, 2000), now, now).run();
+    } catch (error) {
+      if (isUniqueConstraint(error)) return json({ error: "Ya existe un cliente con ese documento de identidad." }, 409);
+      throw error;
+    }
     return json({ ok: true, id }, 201);
   }
   if (body.action === "case.create") {
     const client = await env.PORTAL_DB.prepare("SELECT id FROM portal_clients WHERE id=?").bind(body.clientId).first();
     const stage = await env.PORTAL_DB.prepare("SELECT id FROM portal_stages WHERE id=? AND active=1").bind(body.stageId).first();
-    if (!client || !stage || !clean(body.title, 180)) return json({ error: "Completa cliente, etapa y nombre del caso." }, 400);
+    const title = clean(body.title, 180);
+    const reference = clean(body.reference, 100);
+    const referenceKey = uniqueRecordKey(reference);
+    if (!client || !stage || !title) return json({ error: "Completa cliente, etapa y nombre del caso." }, 400);
+    if (!referenceKey) return json({ error: "Escribe el número o referencia única del caso." }, 400);
+    const existingCase = await env.PORTAL_DB.prepare("SELECT id,title FROM portal_cases WHERE reference_key=?").bind(referenceKey).first();
+    if (existingCase) return json({ error: `El número o referencia ya pertenece al caso ${existingCase.title}.` }, 409);
     const id = crypto.randomUUID();
-    await env.PORTAL_DB.prepare("INSERT INTO portal_cases (id,client_id,stage_id,title,reference,description,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
-      .bind(id, body.clientId, body.stageId, clean(body.title, 180), clean(body.reference, 100), clean(body.description, 2000), now, now).run();
+    try {
+      await env.PORTAL_DB.prepare("INSERT INTO portal_cases (id,client_id,stage_id,title,reference,reference_key,description,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+        .bind(id, body.clientId, body.stageId, title, reference, referenceKey, clean(body.description, 2000), now, now).run();
+    } catch (error) {
+      if (isUniqueConstraint(error)) return json({ error: "Ya existe un caso con ese número o referencia." }, 409);
+      throw error;
+    }
     return json({ ok: true, id }, 201);
   }
   if (body.action === "case.move") {
@@ -739,6 +761,14 @@ function validateAccount(body) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(body.email))) return "Escribe un correo válido.";
   if (String(body.password || "").length < 12) return "La contraseña debe tener al menos 12 caracteres.";
   return null;
+}
+
+function uniqueRecordKey(value) {
+  return String(value || "").trim().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isUniqueConstraint(error) {
+  return /unique constraint|constraint failed/i.test(String(error?.message || error || ""));
 }
 
 async function hashPassword(password, salt) {
