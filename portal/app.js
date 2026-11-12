@@ -3,6 +3,7 @@
   let activeTemplateId = null;
   let documentPage = 1;
   let casePage = 1;
+  let savedEditorRange = null;
   const DOCUMENT_PAGE_SIZE = 12;
   const CASE_PAGE_SIZE = 15;
   const AUTOMATIC_VARIABLES = new Set(["cliente_nombre","cliente_identificacion","cliente_correo","cliente_telefono","caso_titulo","caso_referencia","caso_descripcion","fecha_larga"]);
@@ -229,7 +230,11 @@
   });
 
   const richEditor = document.querySelector("#template-rich-editor");
-  richEditor.addEventListener("input", syncRichEditor);
+  richEditor.addEventListener("input", () => { rememberEditorRange(); syncRichEditor(); });
+  richEditor.addEventListener("keyup", rememberEditorRange);
+  richEditor.addEventListener("mouseup", rememberEditorRange);
+  richEditor.addEventListener("focus", rememberEditorRange);
+  document.addEventListener("selectionchange", rememberEditorRange);
   document.querySelector(".rich-toolbar").addEventListener("mousedown", event => event.preventDefault());
   document.querySelector(".rich-toolbar").addEventListener("click", event => {
     const command = event.target.closest("[data-rich-command]")?.dataset.richCommand;
@@ -243,9 +248,32 @@
     const input = document.querySelector("#template-variable-name");
     const key = variableKey(input.value);
     if (!key) return;
-    richEditor.focus();
-    if (!document.execCommand("insertText", false, `{{${key}}}`)) richEditor.append(document.createTextNode(`{{${key}}}`));
-    input.value = ""; syncRichEditor();
+    insertVariable(key); input.value = "";
+  });
+  document.querySelector("#template-variable-name").addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault(); document.querySelector("#insert-template-variable").click();
+  });
+
+  document.querySelector("#template-variable-list").addEventListener("click", event => {
+    const chip = event.target.closest("[data-variable-key]");
+    if (chip) insertVariable(chip.dataset.variableKey);
+  });
+  document.querySelector("#template-variable-list").addEventListener("dragstart", event => {
+    const chip = event.target.closest("[data-variable-key]");
+    if (!chip) return;
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData("text/plain", `{{${chip.dataset.variableKey}}}`);
+    chip.classList.add("dragging");
+  });
+  document.querySelector("#template-variable-list").addEventListener("dragend", event => event.target.closest("[data-variable-key]")?.classList.remove("dragging"));
+  richEditor.addEventListener("dragover", event => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; richEditor.classList.add("drag-target"); });
+  richEditor.addEventListener("dragleave", event => { if (!richEditor.contains(event.relatedTarget)) richEditor.classList.remove("drag-target"); });
+  richEditor.addEventListener("drop", event => {
+    event.preventDefault(); richEditor.classList.remove("drag-target");
+    const token = event.dataTransfer.getData("text/plain");
+    const match = /^\{\{([^{}]+)\}\}$/.exec(token);
+    if (match) insertVariable(match[1], editorRangeAtPoint(event.clientX, event.clientY));
   });
 
   document.querySelector("#preview-template").addEventListener("click", () => {
@@ -281,8 +309,38 @@
 
   function renderTemplateVariableList() {
     const content = document.querySelector("#template-rich-editor").textContent;
-    const variables = extractVariables(content);
-    document.querySelector("#template-variable-list").innerHTML = variables.length ? variables.map(key => `<code>{{${esc(key)}}}</code>`).join("") : `<span>Esta plantilla aún no contiene variables.</span>`;
+    const used = new Set(extractVariables(content));
+    const automatic = [...AUTOMATIC_VARIABLES];
+    const custom = [...new Set([...extractVariables(content), ...(state.templates || []).flatMap(template => extractVariables(template.content || ""))].filter(key => !AUTOMATIC_VARIABLES.has(key)))];
+    document.querySelector("#template-variable-list").innerHTML = `
+      <section class="variable-group"><h4>Datos automáticos</h4><div class="variable-chips">${automatic.map(key => variableChip(key, used.has(key))).join("")}</div></section>
+      <section class="variable-group"><h4>Variables personalizadas</h4><div class="variable-chips">${custom.length ? custom.map(key => variableChip(key, used.has(key))).join("") : `<p>Aún no has creado variables personalizadas.</p>`}</div></section>`;
+  }
+
+  function variableChip(key, used) {
+    return `<button class="variable-chip ${used ? "used" : ""}" type="button" draggable="true" data-variable-key="${esc(key)}" title="Arrastrar o insertar ${esc(variableLabel(key))}"><span>${esc(variableLabel(key))}</span><code>{{${esc(key)}}}</code></button>`;
+  }
+
+  function rememberEditorRange() {
+    const selection = window.getSelection();
+    if (selection?.rangeCount && richEditor.contains(selection.anchorNode)) savedEditorRange = selection.getRangeAt(0).cloneRange();
+  }
+
+  function editorRangeAtPoint(x, y) {
+    if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+    const position = document.caretPositionFromPoint?.(x, y);
+    if (!position) return null;
+    const range = document.createRange(); range.setStart(position.offsetNode, position.offset); range.collapse(true); return range;
+  }
+
+  function insertVariable(key, range = null) {
+    const token = `{{${key}}}`; const selection = window.getSelection();
+    richEditor.focus(); selection.removeAllRanges();
+    const target = range || savedEditorRange;
+    if (target && richEditor.contains(target.commonAncestorContainer)) selection.addRange(target);
+    else { const end = document.createRange(); end.selectNodeContents(richEditor); end.collapse(false); selection.addRange(end); }
+    if (!document.execCommand("insertText", false, token)) selection.getRangeAt(0).insertNode(document.createTextNode(token));
+    rememberEditorRange(); syncRichEditor();
   }
 
   function syncRichEditor() {
