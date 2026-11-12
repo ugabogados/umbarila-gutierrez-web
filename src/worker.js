@@ -46,6 +46,9 @@ async function handleApi(request, env, url) {
   if (url.pathname === "/api/portal/preview" && request.method === "POST") return previewDocument(request, env);
   if (url.pathname === "/api/portal/actions" && request.method === "POST") return actions(request, env, user);
 
+  const backgroundMatch = url.pathname.match(/^\/api\/portal\/templates\/([^/]+)\/background$/);
+  if (backgroundMatch && request.method === "GET") return templateBackground(env, backgroundMatch[1]);
+
   const fileMatch = url.pathname.match(/^\/api\/portal\/documents\/([^/]+)\/file$/);
   if (fileMatch && request.method === "GET") return internalDocument(env, fileMatch[1]);
   return json({ error: "Ruta no encontrada." }, 404);
@@ -119,7 +122,7 @@ async function snapshot(env, user) {
     env.PORTAL_DB.prepare("SELECT c.*,cl.full_name AS client_name,s.name AS stage_name FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id JOIN portal_stages s ON s.id=c.stage_id ORDER BY c.updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT d.*,cl.full_name AS client_name,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE d.deleted_at IS NULL ORDER BY d.updated_at DESC").all(),
     user.role === "admin" ? env.PORTAL_DB.prepare("SELECT id,email,name,role,active,created_at FROM portal_users ORDER BY name").all() : Promise.resolve({ results: [] }),
-    env.PORTAL_DB.prepare("SELECT id,name,description,content,active,updated_at FROM portal_templates WHERE active=1 ORDER BY name").all(),
+    env.PORTAL_DB.prepare("SELECT id,name,description,content,background_key,active,updated_at FROM portal_templates WHERE active=1 ORDER BY name").all(),
     env.PORTAL_DB.prepare("SELECT l.id,l.document_id,l.token,l.expires_at,l.created_at,l.revoked_at,l.used_at FROM portal_document_links l JOIN portal_documents d ON d.id=l.document_id WHERE d.deleted_at IS NULL ORDER BY l.created_at DESC").all(),
   ]);
   return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, documentLinks: documentLinks.results, users: users.results, templates: templates.results });
@@ -186,6 +189,29 @@ async function actions(request, env, user) {
     await audit(env, null, user.id, "template.created", `Plantilla creada: ${name}`);
     return json({ ok: true, id }, 201);
   }
+  if (body.action === "template.background.update") {
+    const template = await env.PORTAL_DB.prepare("SELECT id FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
+    if (!template) return json({ error: "No se encontró la plantilla." }, 404);
+    const contentType = String(body.contentType || "").toLowerCase();
+    if (!['image/png','image/jpeg'].includes(contentType)) return json({ error: "El fondo debe ser una imagen PNG o JPG." }, 400);
+    let bytes;
+    try { bytes = base64ToBytes(String(body.data || "")); } catch { return json({ error: "No fue posible leer la imagen." }, 400); }
+    if (!bytes.length || bytes.length > 3500000) return json({ error: "La imagen debe pesar menos de 3,5 MB." }, 413);
+    const validPng = contentType === "image/png" && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+    const validJpeg = contentType === "image/jpeg" && bytes[0] === 0xff && bytes[1] === 0xd8;
+    if (!validPng && !validJpeg) return json({ error: "La imagen seleccionada no es válida." }, 400);
+    const key = `template-backgrounds/${template.id}/${crypto.randomUUID()}.${contentType === "image/png" ? "png" : "jpg"}`;
+    await putFile(env, key, bytes, contentType);
+    await env.PORTAL_DB.prepare("UPDATE portal_templates SET background_key=?,updated_at=?,updated_by=? WHERE id=?").bind(key, now, user.id, template.id).run();
+    await audit(env, null, user.id, "template.background.updated", `Fondo actualizado: ${template.id}`);
+    return json({ ok: true });
+  }
+  if (body.action === "template.background.remove") {
+    const result = await env.PORTAL_DB.prepare("UPDATE portal_templates SET background_key=NULL,updated_at=?,updated_by=? WHERE id=? AND active=1").bind(now, user.id, body.templateId).run();
+    if (!result.meta.changes) return json({ error: "No se encontró la plantilla." }, 404);
+    await audit(env, null, user.id, "template.background.removed", `Fondo institucional restaurado: ${body.templateId}`);
+    return json({ ok: true });
+  }
   if (body.action === "document.link.regenerate") {
     const document = await env.PORTAL_DB.prepare("SELECT id,status FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(body.documentId).first();
     if (!document) return json({ error: "No se encontró el documento." }, 404);
@@ -220,11 +246,11 @@ async function createDocument(env, user, body) {
   const variables = sanitizeVariables(body.variables);
   const id = crypto.randomUUID(); const token = randomToken(9); const now = new Date();
   const renderedContent = renderTemplate(template.content, record, variables);
-  const pdf = await buildTemplatePdf(env, template.name, renderedContent);
+  const pdf = await buildTemplatePdf(env, template.name, renderedContent, template.background_key);
   const unsignedKey = `documents/${id}/original.pdf`;
   await putFile(env, unsignedKey, pdf, "application/pdf");
-  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token,custom_title,custom_reference,custom_description,email_to,email_subject,email_body,variables_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000), normalizeOptionalEmail(body.emailTo), cleanHeader(body.emailSubject, 200), clean(body.emailBody, 5000), JSON.stringify(variables)).run();
+  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token,custom_title,custom_reference,custom_description,email_to,email_subject,email_body,variables_snapshot,background_key_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000), normalizeOptionalEmail(body.emailTo), cleanHeader(body.emailSubject, 200), clean(body.emailBody, 5000), JSON.stringify(variables), template.background_key || null).run();
   await env.PORTAL_DB.prepare("INSERT INTO portal_document_links (id,document_id,token,token_hash,expires_at,created_at,created_by) VALUES (?,?,?,?,?,?,?)")
     .bind(crypto.randomUUID(), id, token, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), now.toISOString(), user.id).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
@@ -239,12 +265,12 @@ async function previewDocument(request, env) {
   if (context.error) return json({ error: context.error }, context.status);
   const content = body.content ? String(body.content).slice(0, 100000) : context.template.content;
   const name = clean(body.name, 160) || context.template.name;
-  const pdf = await buildTemplatePdf(env, name, renderTemplate(content, context.record, sanitizeVariables(body.variables)));
+  const pdf = await buildTemplatePdf(env, name, renderTemplate(content, context.record, sanitizeVariables(body.variables)), context.template.background_key);
   return new Response(pdf, { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename=\"${safeFilename(name)}.pdf\"`, "cache-control": "no-store" } });
 }
 
 async function documentContext(env, body, allowSample = false) {
-  const template = await env.PORTAL_DB.prepare("SELECT id,name,description,content FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
+  const template = await env.PORTAL_DB.prepare("SELECT id,name,description,content,background_key FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
   if (!template) return { error: "Selecciona una plantilla.", status: 400 };
   const caseId = clean(body.caseId, 80) || null;
   let record;
@@ -267,6 +293,12 @@ async function internalDocument(env, id) {
   const row = await env.PORTAL_DB.prepare("SELECT signed_key,unsigned_key,title FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(id).first();
   if (!row) return json({ error: "Documento no encontrado." }, 404);
   return storedFile(env, row.signed_key || row.unsigned_key, `${safeFilename(row.title)}.pdf`, "inline");
+}
+
+async function templateBackground(env, id) {
+  const template = await env.PORTAL_DB.prepare("SELECT background_key FROM portal_templates WHERE id=? AND active=1").bind(id).first();
+  if (!template?.background_key) return json({ error: "Esta plantilla utiliza el fondo institucional." }, 404);
+  return storedFile(env, template.background_key, "fondo-plantilla", "inline");
 }
 
 async function signingApi(request, env, token, suffix) {
@@ -293,7 +325,7 @@ async function signingApi(request, env, token, suffix) {
   if (body.signature.length > 1500000) return json({ error: "La firma es demasiado grande." }, 413);
   const original = await getFile(env, doc.unsigned_key); const originalBytes = original.data;
   const signedAt = new Date().toISOString();
-  const signedPdf = await addSignature(new Uint8Array(originalBytes), body.signature, { name: clean(body.signerName, 140), identification: clean(body.signerIdentification, 40), email: normalizeOptionalEmail(body.signerEmail), signedAt });
+  const signedPdf = await addSignature(env, new Uint8Array(originalBytes), body.signature, { name: clean(body.signerName, 140), identification: clean(body.signerIdentification, 40), email: normalizeOptionalEmail(body.signerEmail), signedAt }, doc.background_key_snapshot);
   const signedKey = `documents/${doc.id}/signed.pdf`; const pdfHash = await sha256Bytes(signedPdf);
   await putFile(env, signedKey, signedPdf, "application/pdf", { sha256: pdfHash });
   await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='signed',signed_key=?,signer_name=?,signer_identification=?,signer_email=?,signed_at=?,pdf_hash=?,updated_at=? WHERE id=?")
@@ -304,7 +336,7 @@ async function signingApi(request, env, token, suffix) {
   return json({ ok: true, signedAt });
 }
 
-async function buildTemplatePdf(env, title, content) {
+async function buildTemplatePdf(env, title, content, backgroundKey = null) {
   const pdf = await PDFDocument.create();
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -314,24 +346,27 @@ async function buildTemplatePdf(env, title, content) {
   const ink = rgb(.12, .14, .17);
   const compact = /poder/i.test(title);
   let logo = null;
+  let background = null;
   try {
     const response = await env.ASSETS.fetch(new Request("https://assets.local/assets/images/simbolo-azul.png"));
     if (response.ok) logo = await pdf.embedPng(await response.arrayBuffer());
   } catch {}
+  if (backgroundKey) {
+    try {
+      const object = await getFile(env, backgroundKey); const bytes = new Uint8Array(object.data);
+      background = object.content_type === "image/png" ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+    } catch { background = null; }
+  }
 
   let page; let y;
   const addPage = () => {
     page = pdf.addPage([612, 792]);
-    if (logo) {
+    if (background) page.drawImage(background, { x:0, y:0, width:612, height:792 });
+    else if (logo) {
       const size = logo.scaleToFit(74, 58);
       page.drawImage(logo, { x: (612 - size.width) / 2, y: 716, width: size.width, height: size.height });
     }
-    const firm = "UMBARILA GUTIÉRREZ & ASOCIADOS";
-    page.drawText(firm, { x: (612 - regular.widthOfTextAtSize(firm, 11)) / 2, y: 697, size: 11, font: regular, color: navy });
-    page.drawLine({ start: { x: 76, y: 55 }, end: { x: 536, y: 55 }, thickness: 1.2, color: navy });
-    const email = "umbarilagutierrez.asoc@gmail.com"; const phones = "305 459 1405 - 319 453 2248";
-    page.drawText(email, { x: (612 - regular.widthOfTextAtSize(email, 9.5)) / 2, y: 39, size: 9.5, font: regular, color: navy });
-    page.drawText(phones, { x: (612 - regular.widthOfTextAtSize(phones, 9)) / 2, y: 25, size: 9, font: regular, color: navy });
+    if (!background) drawInstitutionalBase(page, regular, navy);
     y = 668;
   };
   addPage();
@@ -364,6 +399,7 @@ async function buildTemplatePdf(env, title, content) {
       }
       y -= heading ? 6 : 4;
     }
+    pdf.setSubject(`UG_CONTENT_BOTTOM:${Math.max(0, y).toFixed(2)}`);
     return pdf.save();
   }
 
@@ -387,7 +423,17 @@ async function buildTemplatePdf(env, title, content) {
     }
     y -= compact ? 2 : isHeading ? 5 : 4;
   }
+  pdf.setSubject(`UG_CONTENT_BOTTOM:${Math.max(0, y).toFixed(2)}`);
   return pdf.save();
+}
+
+function drawInstitutionalBase(page, regular, navy) {
+  const firm = "UMBARILA GUTIÉRREZ & ASOCIADOS";
+  page.drawText(firm, { x: (page.getWidth() - regular.widthOfTextAtSize(firm, 11)) / 2, y: page.getHeight() - 95, size: 11, font: regular, color: navy });
+  page.drawLine({ start: { x: 76, y: 55 }, end: { x: page.getWidth() - 76, y: 55 }, thickness: 1.2, color: navy });
+  const email = "umbarilagutierrez.asoc@gmail.com"; const phones = "305 459 1405 - 319 453 2248";
+  page.drawText(email, { x: (page.getWidth() - regular.widthOfTextAtSize(email, 9.5)) / 2, y: 39, size: 9.5, font: regular, color: navy });
+  page.drawText(phones, { x: (page.getWidth() - regular.widthOfTextAtSize(phones, 9)) / 2, y: 25, size: 9, font: regular, color: navy });
 }
 
 function looksLikeRichText(content) {
@@ -508,19 +554,51 @@ function sanitizeVariables(value) {
   return variables;
 }
 
-async function addSignature(original, signatureDataUrl, signer) {
-  const pdf = await PDFDocument.load(original); const page = pdf.addPage([595.28, 841.89]);
+async function addSignature(env, original, signatureDataUrl, signer, backgroundKey = null) {
+  const pdf = await PDFDocument.load(original);
   const regular = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  page.drawText("CONSTANCIA DE FIRMA", { x: 42, y: 780, size: 18, font: bold, color: rgb(1/255,27/255,54/255) });
-  drawWrapped(page, "La persona identificada a continuación manifiesta su aceptación y firma el documento mediante el enlace individual suministrado por la firma.", 42, 744, 511, 11, regular, rgb(.2,.2,.2), 16);
+  const navy = rgb(1/255,27/255,54/255); const ink = rgb(.18,.2,.23);
+  const subject = pdf.getSubject() || ""; const bottomMatch = /^UG_CONTENT_BOTTOM:([0-9.]+)$/.exec(subject);
+  const contentBottom = bottomMatch ? Number(bottomMatch[1]) : null;
+  const pages = pdf.getPages(); let page = pages[pages.length - 1]; let top = contentBottom ? contentBottom - 8 : 0;
+  const blockHeight = 145; const pageBottom = 72;
+  if (!contentBottom || top - blockHeight < pageBottom) {
+    const { width, height } = page.getSize(); page = pdf.addPage([width, height]); top = height - 118;
+    let customBackground = null;
+    if (backgroundKey) {
+      try {
+        const object = await getFile(env, backgroundKey); const bytes = new Uint8Array(object.data);
+        customBackground = object.content_type === "image/png" ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+      } catch { customBackground = null; }
+    }
+    if (customBackground) page.drawImage(customBackground, { x:0, y:0, width, height });
+    else {
+      try {
+        const response = await env.ASSETS.fetch(new Request("https://assets.local/assets/images/simbolo-azul.png"));
+        if (response.ok) {
+          const logo = await pdf.embedPng(await response.arrayBuffer()); const size = logo.scaleToFit(74, 58);
+          page.drawImage(logo, { x:(width - size.width) / 2, y:height - 76, width:size.width, height:size.height });
+        }
+      } catch {}
+      drawInstitutionalBase(page, regular, rgb(2/255,46/255,104/255));
+    }
+  }
+  const left = 80; const usableWidth = page.getWidth() - 160;
+  page.drawLine({ start:{ x:left, y:top + 10 }, end:{ x:left + usableWidth, y:top + 10 }, thickness:.7, color:rgb(.72,.76,.8) });
+  page.drawText("CONSTANCIA DE FIRMA", { x:left, y:top, size:12.5, font:bold, color:navy });
+  drawWrapped(page, "La persona identificada manifiesta su aceptación y firma el documento mediante el enlace individual suministrado por la firma.", left, top - 18, usableWidth, 8.8, regular, ink, 11);
   const pngBytes = Uint8Array.from(atob(signatureDataUrl.split(",")[1]), c => c.charCodeAt(0));
-  const signature = await pdf.embedPng(pngBytes); const scaled = signature.scaleToFit(450, 230);
-  page.drawRectangle({ x: 42, y: 400, width: 511, height: 270, borderColor: rgb(.75,.75,.75), borderWidth: 1 });
-  page.drawImage(signature, { x: 42 + (511 - scaled.width) / 2, y: 420 + (230 - scaled.height) / 2, width: scaled.width, height: scaled.height });
-  page.drawText(`Nombre: ${signer.name}`, { x: 42, y: 355, size: 11, font: bold });
-  page.drawText(`Identificación: ${signer.identification}`, { x: 42, y: 332, size: 11, font: regular });
-  page.drawText(`Correo: ${signer.email || "No indicado"}`, { x: 42, y: 309, size: 11, font: regular });
-  page.drawText(`Fecha UTC: ${signer.signedAt}`, { x: 42, y: 286, size: 10, font: regular });
+  const signature = await pdf.embedPng(pngBytes); const box = { x:left, y:top - 137, width:190, height:82 }; const scaled = signature.scaleToFit(174, 68);
+  page.drawRectangle({ ...box, borderColor:rgb(.72,.76,.8), borderWidth:.8, color:rgb(1,1,1), opacity:.72 });
+  page.drawImage(signature, { x:box.x + (box.width - scaled.width) / 2, y:box.y + (box.height - scaled.height) / 2, width:scaled.width, height:scaled.height });
+  const detailX = left + 215; let detailY = top - 65;
+  page.drawText("Firmado por", { x:detailX, y:detailY, size:8.2, font:regular, color:rgb(.38,.42,.47) }); detailY -= 15;
+  detailY = drawWrapped(page, signer.name, detailX, detailY, usableWidth - 215, 9.5, bold, navy, 11); detailY -= 3;
+  page.drawText(`Identificación: ${signer.identification}`, { x:detailX, y:detailY, size:8.5, font:regular, color:ink }); detailY -= 13;
+  detailY = drawWrapped(page, `Correo: ${signer.email || "No indicado"}`, detailX, detailY, usableWidth - 215, 8.5, regular, ink, 10.5); detailY -= 2;
+  const signedDate = new Intl.DateTimeFormat("es-CO", { dateStyle:"medium", timeStyle:"short", timeZone:"America/Bogota" }).format(new Date(signer.signedAt));
+  page.drawText(`Fecha de firma: ${signedDate}`, { x:detailX, y:detailY, size:8.2, font:regular, color:ink });
+  pdf.setSubject("Documento firmado electrónicamente por Umbarila Gutiérrez & Asociados");
   return pdf.save();
 }
 
@@ -595,6 +673,7 @@ async function sha256(value) { return sha256Bytes(encoder.encode(value)); }
 async function sha256Bytes(value) { const digest = await crypto.subtle.digest("SHA-256", value); return [...new Uint8Array(digest)].map(v=>v.toString(16).padStart(2,"0")).join(""); }
 function randomToken(bytes) { const values = crypto.getRandomValues(new Uint8Array(bytes)); return bytesToBase64(values).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,""); }
 function bytesToBase64(bytes) { let out=""; for (let i=0;i<bytes.length;i+=8192) out += String.fromCharCode(...bytes.subarray(i,i+8192)); return btoa(out); }
+function base64ToBytes(value) { const binary = atob(value); const bytes = new Uint8Array(binary.length); for (let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i); return bytes; }
 function cookieValue(request, name) { const match = request.headers.get("cookie")?.match(new RegExp(`(?:^|; )${name}=([^;]+)`)); return match ? match[1] : null; }
 function normalizeEmail(value) { return String(value || "").trim().toLowerCase(); }
 function normalizeOptionalEmail(value) { const email=normalizeEmail(value); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : ""; }

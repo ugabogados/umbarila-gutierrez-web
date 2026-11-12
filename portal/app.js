@@ -147,6 +147,11 @@
     form.elements.templateId.value = selected.id;
     form.elements.name.value = selected.name;
     form.elements.description.value = selected.description || "";
+    const backgroundPreview = document.querySelector("#template-background-preview");
+    backgroundPreview.innerHTML = selected.background_key
+      ? `<img src="/api/portal/templates/${encodeURIComponent(selected.id)}/background?v=${encodeURIComponent(selected.updated_at || "")}" alt="Fondo personalizado de ${esc(selected.name)}" />`
+      : `<div class="institutional-background-sample"><strong>UG</strong><span>UMBARILA GUTIÉRREZ &amp; ASOCIADOS</span><small>Fondo institucional predeterminado</small></div>`;
+    document.querySelector("#remove-template-background").disabled = !selected.background_key;
     const editor = document.querySelector("#template-rich-editor");
     editor.innerHTML = sanitizeTemplateHtml(looksLikeHtml(selected.content) ? selected.content : plainToEditorHtml(selected.content));
     syncRichEditor();
@@ -227,6 +232,25 @@
       await api("/api/portal/actions", { method:"POST", body:JSON.stringify(data) });
       await refresh("Plantilla guardada correctamente.");
     } catch (error) { setStatus(globalStatus, error.message); }
+  });
+
+  document.querySelector("#template-background-file").addEventListener("change", async event => {
+    const file = event.target.files?.[0]; if (!file) return;
+    if (!['image/png','image/jpeg'].includes(file.type)) { setStatus(globalStatus, "Selecciona una imagen PNG o JPG."); event.target.value = ""; return; }
+    if (file.size > 3500000) { setStatus(globalStatus, "La imagen debe pesar menos de 3,5 MB."); event.target.value = ""; return; }
+    setStatus(globalStatus, "Guardando el fondo…", true);
+    try {
+      await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"template.background.update", templateId:activeTemplateId, contentType:file.type, data:await fileBase64(file) }) });
+      event.target.value = ""; await refresh("Fondo de la plantilla actualizado.");
+    } catch (error) { event.target.value = ""; setStatus(globalStatus, error.message); }
+  });
+  document.querySelector("#remove-template-background").addEventListener("click", async event => {
+    if (!confirm("¿Restaurar el fondo institucional para esta plantilla?")) return;
+    event.currentTarget.disabled = true;
+    try {
+      await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"template.background.remove", templateId:activeTemplateId }) });
+      await refresh("Fondo institucional restaurado.");
+    } catch (error) { event.currentTarget.disabled = false; setStatus(globalStatus, error.message); }
   });
 
   const richEditor = document.querySelector("#template-rich-editor");
@@ -388,6 +412,12 @@
 
   function variableKey(value) { return String(value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""); }
   function variableLabel(key) { const value = String(key).replace(/[_-]+/g, " "); return value.charAt(0).toUpperCase() + value.slice(1); }
+
+  async function fileBase64(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
+    for (let index=0; index<bytes.length; index+=8192) binary += String.fromCharCode(...bytes.subarray(index,index+8192));
+    return btoa(binary);
+  }
 
   document.querySelectorAll("dialog form[data-action]").forEach(form => form.addEventListener("submit", async event => {
     event.preventDefault();

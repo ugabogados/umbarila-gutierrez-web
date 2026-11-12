@@ -7,8 +7,8 @@
     <meta name="theme-color" content="#011b36" />
     <title>Portal interno | Umbarila Gutiérrez</title>
     <link rel="icon" href="/assets/images/simbolo-dorado.png" type="image/png" />
-    <link rel="stylesheet" href="/portal/app.css?v=20261112-variables" />
-    <script src="/portal/app.js?v=20261112-variables" defer></script>
+    <link rel="stylesheet" href="/portal/app.css?v=20261112-fondos" />
+    <script src="/portal/app.js?v=20261112-fondos" defer></script>
   </head>
   <body>
     <div id="auth-screen" class="auth-shell" hidden>
@@ -101,6 +101,12 @@
               <div class="panel-heading"><div><p class="kicker">EDITOR</p><h2>Editar plantilla</h2></div><button class="primary" type="submit">Guardar cambios</button></div>
               <label>Nombre de la plantilla<input name="name" required maxlength="160" /></label>
               <label>Descripción<input name="description" maxlength="500" /></label>
+              <section class="template-background-editor" aria-labelledby="template-background-title">
+                <div><p class="kicker">PAPEL MEMBRETADO</p><h3 id="template-background-title">Fondo del documento</h3><p>Se aplicará a todas las páginas, incluida una página adicional de firma cuando sea necesaria.</p></div>
+                <div id="template-background-preview" class="template-background-preview"></div>
+                <div class="template-background-actions"><label class="secondary" for="template-background-file">Cambiar fondo</label><input id="template-background-file" type="file" accept="image/png,image/jpeg" hidden /><button id="remove-template-background" class="secondary" type="button">Usar fondo institucional</button></div>
+                <small>Recomendado: imagen vertical PNG o JPG, proporción carta y máximo 3,5 MB.</small>
+              </section>
               <div class="template-workspace">
                 <div class="rich-editor-field"><span>Contenido</span><div class="rich-toolbar" role="toolbar" aria-label="Formato del documento"><button type="button" data-rich-command="bold" title="Negrita"><strong>N</strong></button><button type="button" data-rich-command="italic" title="Cursiva"><em>C</em></button><button type="button" data-rich-command="underline" title="Subrayado"><u>S</u></button><span></span><button type="button" data-rich-block="p">Párrafo</button><button type="button" data-rich-block="h2">Título</button><button type="button" data-rich-block="h3">Subtítulo</button><span></span><button type="button" data-rich-command="justifyLeft" title="Alinear a la izquierda">≡</button><button type="button" data-rich-command="justifyCenter" title="Centrar">≣</button><button type="button" data-rich-command="justifyRight" title="Alinear a la derecha">≡</button><button type="button" data-rich-command="insertUnorderedList" title="Lista con viñetas">• Lista</button><button type="button" data-rich-command="insertOrderedList" title="Lista numerada">1. Lista</button></div><div id="template-rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-multiline="true"></div><textarea name="content" hidden required></textarea></div>
                 <aside class="variable-palette" aria-labelledby="variable-palette-title">
