@@ -1,6 +1,8 @@
 (() => {
   const state = { user: null, clients: [], stages: [], cases: [], documents: [], documentLinks: [], templates: [], users: [] };
   let activeTemplateId = null;
+  let documentPage = 1;
+  const DOCUMENT_PAGE_SIZE = 12;
   const authScreen = document.querySelector("#auth-screen");
   const app = document.querySelector("#portal-app");
   const authStatus = document.querySelector("#auth-status");
@@ -81,18 +83,31 @@
   function renderClients() {
     document.querySelector("#clients-list").innerHTML = state.clients.map(item => {
       const documents = state.documents.filter(document => document.client_id === item.id);
-      return `<article class="client-card"><div class="client-head"><div><h3>${esc(item.full_name)}</h3><p>${esc(item.identification || "Sin identificación")}</p></div><span class="badge">${documents.length} documento${documents.length === 1 ? "" : "s"}</span></div><p>${esc(item.email || "Sin correo")}</p><p>${esc(item.phone || "Sin teléfono")}</p><button class="secondary client-document-button" type="button" data-client-document="${item.id}">Generar documento</button><div class="client-documents"><strong>Documentos relacionados</strong>${documents.length ? documents.map(document => `<div class="client-document"><div><span>${esc(document.title)}</span><small>${esc(formatDate(document.created_at))}</small></div><span class="badge ${document.status}">${documentStatus(document.status)}</span><a href="/api/portal/documents/${document.id}/file">Descargar</a></div>`).join("") : `<small>Aún no hay documentos para este cliente.</small>`}</div></article>`;
+      return `<article class="client-card"><div class="client-head"><div><h3>${esc(item.full_name)}</h3><p>${esc(item.identification || "Sin identificación")}</p></div><span class="badge">${documents.length} documento${documents.length === 1 ? "" : "s"}</span></div><p>${esc(item.email || "Sin correo")}</p><p>${esc(item.phone || "Sin teléfono")}</p><button class="secondary client-document-button" type="button" data-client-document="${item.id}">Generar documento</button><div class="client-documents"><strong>Documentos relacionados</strong>${documents.length ? documents.slice(0,3).map(document => `<div class="client-document"><div><span>${esc(document.title)}</span><small>${esc(formatDate(document.created_at))}</small></div><span class="badge ${document.status}">${documentStatus(document.status)}</span><a href="/api/portal/documents/${document.id}/file">Descargar</a></div>`).join("") + (documents.length > 3 ? `<small>Y ${documents.length - 3} documento${documents.length - 3 === 1 ? "" : "s"} más en la sección Documentos.</small>` : "") : `<small>Aún no hay documentos para este cliente.</small>`}</div></article>`;
     }).join("") || empty("Aún no hay clientes registrados.");
   }
 
   function renderDocuments() {
-    document.querySelector("#documents-list").innerHTML = state.documents.map(item => {
+    const query = document.querySelector("#document-search").value.trim().toLowerCase();
+    const statusFilter = document.querySelector("#document-status-filter").value;
+    const filtered = state.documents.filter(item => {
+      const haystack = `${item.title} ${item.client_name} ${item.case_title} ${item.custom_reference || ""} ${item.custom_title || ""}`.toLowerCase();
+      return (!query || haystack.includes(query)) && (!statusFilter || item.status === statusFilter);
+    });
+    const pages = Math.max(1, Math.ceil(filtered.length / DOCUMENT_PAGE_SIZE));
+    documentPage = Math.min(documentPage, pages);
+    const visible = filtered.slice((documentPage - 1) * DOCUMENT_PAGE_SIZE, documentPage * DOCUMENT_PAGE_SIZE);
+    document.querySelector("#document-count").textContent = `${filtered.length} documento${filtered.length === 1 ? "" : "s"}`;
+    document.querySelector("#documents-page").textContent = `Página ${documentPage} de ${pages}`;
+    document.querySelector("#documents-prev").disabled = documentPage <= 1;
+    document.querySelector("#documents-next").disabled = documentPage >= pages;
+    document.querySelector("#documents-list").innerHTML = visible.map(item => {
       const links = (state.documentLinks || []).filter(link => link.document_id === item.id);
       const signingUrl = item.signing_token ? `${location.origin}/firmar/${item.signing_token}` : "";
       const activeLink = signingUrl && item.status !== "expired";
       const expiry = item.expires_at ? new Intl.DateTimeFormat("es-CO", { dateStyle:"medium" }).format(new Date(item.expires_at)) : "";
-      return `<article class="list-row document-row"><div class="document-info"><strong>${esc(item.title)}</strong><small>Cliente: ${esc(item.client_name)} · ${esc(item.case_title)}</small><small>${item.status === "signed" && item.signed_at ? `Firmado el ${esc(formatDate(item.signed_at))}` : `Creado el ${esc(formatDate(item.created_at))} · Enlace vigente hasta ${esc(expiry)}`}</small>${activeLink ? `<div class="generated-link"><span>${esc(signingUrl)}</span></div>` : ""}<details class="link-history"><summary>Historial de enlaces (${links.length})</summary>${links.map(link => `<div><span>${link.used_at ? "Usado para firmar" : link.revoked_at ? "Reemplazado" : new Date(link.expires_at) <= new Date() ? "Vencido" : "Activo"}</span><small>${esc(formatDate(link.created_at))}</small></div>`).join("") || `<small>Sin enlaces registrados.</small>`}</details></div><div class="row-actions"><span class="badge ${item.status}">${documentStatus(item.status)}</span><a href="/api/portal/documents/${item.id}/file">Descargar</a>${activeLink ? `<a href="${esc(signingUrl)}" target="_blank" rel="noopener">Abrir enlace</a><button type="button" data-copy-signing="${esc(signingUrl)}">Copiar</button><a href="https://wa.me/?text=${encodeURIComponent(`Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${signingUrl}`)}" target="_blank" rel="noopener">WhatsApp</a>` : `<button type="button" data-regenerate-link="${item.id}">Generar nuevo enlace</button>`}</div></article>`;
-    }).join("") || empty("Aún no se han generado documentos.");
+      return `<article class="document-compact"><div class="document-main"><strong>${esc(item.title)}</strong><small>${esc(item.client_name)} · ${esc(item.case_title)}</small></div><span class="document-date">${esc(formatDate(item.created_at))}</span><span class="badge ${item.status}">${documentStatus(item.status)}</span><details class="document-menu"><summary>Acciones</summary><div><a href="/api/portal/documents/${item.id}/file">Descargar PDF</a>${activeLink ? `<a href="${esc(signingUrl)}" target="_blank" rel="noopener">Abrir enlace</a><button type="button" data-copy-signing="${esc(signingUrl)}">Copiar enlace</button><a href="https://wa.me/?text=${encodeURIComponent(`Hola. Umbarila Gutiérrez & Asociados te ha enviado un documento para revisar y firmar: ${signingUrl}`)}" target="_blank" rel="noopener">Enviar por WhatsApp</a>` : `<button type="button" data-regenerate-link="${item.id}">Generar nuevo enlace</button>`}<details class="compact-history"><summary>Historial (${links.length})</summary>${links.map(link => `<small>${link.used_at ? "Usado" : link.revoked_at ? "Reemplazado" : new Date(link.expires_at) <= new Date() ? "Vencido" : `Activo hasta ${expiry}`}</small>`).join("")}</details><button class="danger-action" type="button" data-delete-document="${item.id}" data-document-title="${esc(item.title)}">Eliminar</button></div></details></article>`;
+    }).join("") || empty("No se encontraron documentos.");
   }
 
   function renderTemplates() {
@@ -218,7 +233,23 @@
     catch (error) { setStatus(globalStatus, error.message); }
   });
 
+  document.querySelector("#document-search").addEventListener("input", () => { documentPage = 1; renderDocuments(); });
+  document.querySelector("#document-status-filter").addEventListener("change", () => { documentPage = 1; renderDocuments(); });
+  document.querySelector("#documents-prev").addEventListener("click", () => { if (documentPage > 1) { documentPage--; renderDocuments(); } });
+  document.querySelector("#documents-next").addEventListener("click", () => { documentPage++; renderDocuments(); });
+
   document.querySelector("#documents-list").addEventListener("click", async event => {
+    const remove = event.target.closest("[data-delete-document]");
+    if (remove) {
+      const confirmed = confirm(`¿Eliminar "${remove.dataset.documentTitle}"? El enlace de firma dejará de funcionar.`);
+      if (!confirmed) return;
+      remove.disabled = true;
+      try {
+        await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"document.delete", documentId:remove.dataset.deleteDocument }) });
+        await refresh("Documento eliminado.");
+      } catch (error) { remove.disabled = false; setStatus(globalStatus, error.message); }
+      return;
+    }
     const copy = event.target.closest("[data-copy-signing]");
     if (copy) {
       try { await navigator.clipboard.writeText(copy.dataset.copySigning); setStatus(globalStatus, "Enlace copiado.", true); }

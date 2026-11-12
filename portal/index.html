@@ -77,7 +77,9 @@
 
         <section class="view" data-panel="documents">
           <div class="panel-heading page-actions"><p>Genera, comparte y consulta documentos firmados.</p><button class="primary" data-open="document-dialog">Generar documento</button></div>
+          <div class="document-toolbar"><label>Buscar<input id="document-search" type="search" placeholder="Cliente, documento o referencia" /></label><label>Estado<select id="document-status-filter"><option value="">Todos</option><option value="pending">Sin firmar</option><option value="signed">Firmados</option><option value="expired">Vencidos</option></select></label><span id="document-count"></span></div>
           <div id="documents-list" class="list"></div>
+          <div class="document-pagination"><button id="documents-prev" class="secondary" type="button">Anterior</button><span id="documents-page"></span><button id="documents-next" class="secondary" type="button">Siguiente</button></div>
         </section>
 
         <section class="view" data-panel="templates">

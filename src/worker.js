@@ -111,16 +111,16 @@ function publicUser(user) { return { id: user.id, email: user.email, name: user.
 
 async function snapshot(env, user) {
   await ensureTemplates(env);
-  await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='expired',updated_at=? WHERE status='pending' AND expires_at<=?")
+  await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='expired',updated_at=? WHERE status='pending' AND deleted_at IS NULL AND expires_at<=?")
     .bind(new Date().toISOString(), new Date().toISOString()).run();
   const [clients, stages, cases, documents, users, templates, documentLinks] = await Promise.all([
     env.PORTAL_DB.prepare("SELECT * FROM portal_clients ORDER BY updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT * FROM portal_stages WHERE active=1 ORDER BY position").all(),
     env.PORTAL_DB.prepare("SELECT c.*,cl.full_name AS client_name,s.name AS stage_name FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id JOIN portal_stages s ON s.id=c.stage_id ORDER BY c.updated_at DESC").all(),
-    env.PORTAL_DB.prepare("SELECT d.*,cl.full_name AS client_name,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id ORDER BY d.updated_at DESC").all(),
+    env.PORTAL_DB.prepare("SELECT d.*,cl.full_name AS client_name,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE d.deleted_at IS NULL ORDER BY d.updated_at DESC").all(),
     user.role === "admin" ? env.PORTAL_DB.prepare("SELECT id,email,name,role,active,created_at FROM portal_users ORDER BY name").all() : Promise.resolve({ results: [] }),
     env.PORTAL_DB.prepare("SELECT id,name,description,content,active,updated_at FROM portal_templates WHERE active=1 ORDER BY name").all(),
-    env.PORTAL_DB.prepare("SELECT id,document_id,token,expires_at,created_at,revoked_at,used_at FROM portal_document_links ORDER BY created_at DESC").all(),
+    env.PORTAL_DB.prepare("SELECT l.id,l.document_id,l.token,l.expires_at,l.created_at,l.revoked_at,l.used_at FROM portal_document_links l JOIN portal_documents d ON d.id=l.document_id WHERE d.deleted_at IS NULL ORDER BY l.created_at DESC").all(),
   ]);
   return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, documentLinks: documentLinks.results, users: users.results, templates: templates.results });
 }
@@ -178,7 +178,7 @@ async function actions(request, env, user) {
     return json({ ok: true });
   }
   if (body.action === "document.link.regenerate") {
-    const document = await env.PORTAL_DB.prepare("SELECT id,status FROM portal_documents WHERE id=?").bind(body.documentId).first();
+    const document = await env.PORTAL_DB.prepare("SELECT id,status FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(body.documentId).first();
     if (!document) return json({ error: "No se encontró el documento." }, 404);
     const token = randomToken(32); const expiresAt = new Date(Date.now() + SIGNING_DAYS * 86400000).toISOString();
     await env.PORTAL_DB.prepare("UPDATE portal_document_links SET revoked_at=? WHERE document_id=? AND revoked_at IS NULL")
@@ -190,6 +190,14 @@ async function actions(request, env, user) {
     await audit(env, document.id, user.id, "document.link.regenerated", "Enlace de firma regenerado");
     const base = String(env.PUBLIC_ORIGIN || "https://ugabogados.com").replace(/\/$/, "");
     return json({ ok: true, signingUrl: `${base}/firmar/${token}` });
+  }
+  if (body.action === "document.delete") {
+    const document = await env.PORTAL_DB.prepare("SELECT id,title FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(body.documentId).first();
+    if (!document) return json({ error: "No se encontró el documento." }, 404);
+    await audit(env, document.id, user.id, "document.deleted", `Documento eliminado: ${document.title}`);
+    await env.PORTAL_DB.prepare("UPDATE portal_document_links SET revoked_at=? WHERE document_id=? AND revoked_at IS NULL").bind(now, document.id).run();
+    await env.PORTAL_DB.prepare("UPDATE portal_documents SET deleted_at=?,deleted_by=?,updated_at=? WHERE id=?").bind(now, user.id, now, document.id).run();
+    return json({ ok: true });
   }
   if (body.action === "document.create") return createDocument(env, user, body);
   return json({ error: "Acción desconocida." }, 400);
@@ -246,14 +254,14 @@ async function documentContext(env, body, allowSample = false) {
 }
 
 async function internalDocument(env, id) {
-  const row = await env.PORTAL_DB.prepare("SELECT signed_key,unsigned_key,title FROM portal_documents WHERE id=?").bind(id).first();
+  const row = await env.PORTAL_DB.prepare("SELECT signed_key,unsigned_key,title FROM portal_documents WHERE id=? AND deleted_at IS NULL").bind(id).first();
   if (!row) return json({ error: "Documento no encontrado." }, 404);
   return storedFile(env, row.signed_key || row.unsigned_key, `${safeFilename(row.title)}.pdf`);
 }
 
 async function signingApi(request, env, token, suffix) {
   const tokenHash = await sha256(token);
-  const doc = await env.PORTAL_DB.prepare("SELECT d.*,l.id AS link_id,l.expires_at AS link_expires_at,cl.full_name,cl.identification,cl.email,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_document_links l JOIN portal_documents d ON d.id=l.document_id JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE l.token_hash=? AND l.revoked_at IS NULL").bind(tokenHash).first();
+  const doc = await env.PORTAL_DB.prepare("SELECT d.*,l.id AS link_id,l.expires_at AS link_expires_at,cl.full_name,cl.identification,cl.email,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_document_links l JOIN portal_documents d ON d.id=l.document_id JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE l.token_hash=? AND l.revoked_at IS NULL AND d.deleted_at IS NULL").bind(tokenHash).first();
   if (!doc || new Date(doc.link_expires_at) <= new Date()) return json({ error: "Este enlace no está disponible o venció." }, 404);
   if (suffix === "file" && request.method === "GET") return storedFile(env, doc.signed_key || doc.unsigned_key, "documento-firmado.pdf");
   if (suffix === "email" && request.method === "GET") {
