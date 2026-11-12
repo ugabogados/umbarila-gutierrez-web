@@ -10,23 +10,18 @@
     <script src="/portal/firma.js" defer></script>
   </head>
   <body>
-    <header><img src="/assets/images/simbolo-dorado.png" width="70" height="53" alt="" /><span>UMBARILA GUTIÉRREZ<small>&amp; ASOCIADOS</small></span></header>
+    <header><img src="/assets/images/simbolo-dorado.png" width="62" height="47" alt="" /><span>UMBARILA GUTIÉRREZ<small>&amp; ASOCIADOS</small></span></header>
     <main>
-      <section id="loading" class="message-card"><h1>Preparando tu documento…</h1><p>Espera un momento, por favor.</p></section>
+      <section id="loading" class="message-card"><h1>Preparando tu documento…</h1></section>
       <section id="unavailable" class="message-card" hidden><h1>Enlace no disponible</h1><p id="unavailable-message">Solicita a la firma un nuevo enlace.</p></section>
-      <section id="signed" class="message-card" hidden><p class="step">DOCUMENTO FIRMADO</p><h1>Tu firma quedó guardada.</h1><p>El documento ya fue enviado al historial de la firma. También puedes descargar tu copia.</p><div class="actions"><a id="download-signed" class="primary">Descargar PDF firmado</a><a id="prepare-email" class="secondary">Preparar correo con adjunto</a></div></section>
-      <section id="signing" class="signing-shell" hidden>
-        <div class="signing-intro">
-          <p class="step">FIRMA DEL DOCUMENTO</p><h1>Valida tus datos y firma.</h1>
-          <p>Lee el documento y confirma que tus datos estén correctos. Si necesitas ayuda, comunícate con la firma antes de firmar.</p>
-          <a id="review-document" class="document-link" target="_blank" rel="noopener">Abrir y revisar el documento PDF</a>
-          <div class="document-summary"><span>Documento</span><strong id="document-title"></strong></div>
-        </div>
+      <section id="signed" class="message-card" hidden><p class="step">DOCUMENTO FIRMADO</p><h1>Tu firma quedó guardada.</h1><p>El documento ya forma parte del historial de la firma.</p><div class="actions"><a id="download-signed" class="primary">Descargar PDF firmado</a><a id="prepare-email" class="secondary">Preparar correo</a></div></section>
+      <section id="signing" class="sign-card" hidden>
+        <div class="document-heading"><p class="step">DOCUMENTO PARA FIRMA</p><h1 id="document-title">Documento</h1><a id="review-document" class="secondary preview" target="_blank" rel="noopener">Previsualizar documento</a></div>
         <form id="sign-form">
-          <fieldset><legend>1. Confirma tus datos</legend><label>Nombre completo<input name="signerName" required autocomplete="name" /></label><label>Número de identificación<input name="signerIdentification" required inputmode="numeric" /></label><label>Correo personal<input name="signerEmail" type="email" autocomplete="email" /></label></fieldset>
-          <fieldset class="signature-fieldset"><legend>2. Firma dentro del recuadro</legend><p class="signature-help">Usa el dedo o el mouse. El espacio amplio está pensado para que puedas firmar con comodidad.</p><div class="signature-wrap"><canvas id="signature" width="1200" height="650" aria-label="Área amplia para dibujar la firma"></canvas><span class="signature-line">FIRMA AQUÍ</span></div><button id="clear-signature" type="button" class="clear">Borrar y volver a firmar</button></fieldset>
-          <label class="consent"><input name="consent" type="checkbox" required /><span>Confirmo que revisé el documento, que mis datos son correctos y que esta es mi firma.</span></label>
-          <button class="primary submit" type="submit">Confirmar y firmar documento</button><p id="sign-status" role="status" aria-live="polite"></p>
+          <div class="signature-title"><h2>Firma dentro del recuadro</h2><span id="clear-signature" role="button" tabindex="0">Limpiar firma</span></div>
+          <div class="signature-wrap"><canvas id="signature" width="1200" height="700" aria-label="Área amplia para dibujar la firma"></canvas><span class="signature-line">FIRMA AQUÍ</span></div>
+          <button class="primary submit" type="submit">Firmar documento</button>
+          <p id="sign-status" role="status" aria-live="polite"></p>
         </form>
       </section>
     </main>

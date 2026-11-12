@@ -8,6 +8,7 @@
   const context = canvas.getContext("2d");
   let drawing = false;
   let hasSignature = false;
+  let signerData = { name: "", identification: "", email: "" };
 
   async function api(path, options) {
     const response = await fetch(path, { ...options, headers: { "content-type": "application/json" } });
@@ -23,9 +24,7 @@
       if (data.status === "signed") return showSigned();
       signing.hidden = false;
       document.querySelector("#document-title").textContent = data.title || "Documento para firma";
-      document.querySelector('[name="signerName"]').value = data.clientName || "";
-      document.querySelector('[name="signerIdentification"]').value = data.identification || "";
-      document.querySelector('[name="signerEmail"]').value = data.email || "";
+      signerData = { name: data.clientName || "", identification: data.identification || "", email: data.email || "" };
       document.querySelector("#review-document").href = `/api/sign/${encodeURIComponent(token)}/file`;
       prepareCanvas();
     } catch (error) {
@@ -43,14 +42,16 @@
     canvas.addEventListener("pointerdown", start); canvas.addEventListener("pointermove", move); window.addEventListener("pointerup", stop);
   }
 
-  document.querySelector("#clear-signature").addEventListener("click", () => { context.clearRect(0,0,canvas.width,canvas.height); hasSignature=false; });
+  const clearSignature = () => { context.clearRect(0,0,canvas.width,canvas.height); hasSignature=false; };
+  document.querySelector("#clear-signature").addEventListener("click", clearSignature);
+  document.querySelector("#clear-signature").addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); clearSignature(); } });
   document.querySelector("#sign-form").addEventListener("submit", async event => {
     event.preventDefault(); const status=document.querySelector("#sign-status");
     if(!hasSignature){ status.textContent="Dibuja tu firma dentro del recuadro."; return; }
     const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.textContent="Guardando firma…"; status.textContent="Estamos incorporando tu firma al documento. No cierres esta ventana.";
-    const data=Object.fromEntries(new FormData(event.currentTarget)); data.consent=true; data.signature=canvas.toDataURL("image/png");
+    const data={ consent:true, signerName:signerData.name, signerIdentification:signerData.identification, signerEmail:signerData.email, signature:canvas.toDataURL("image/png") };
     try { await api(`/api/sign/${encodeURIComponent(token)}`, { method:"POST", body:JSON.stringify(data) }); signing.hidden=true; showSigned(); }
-    catch(error){ status.textContent=error.message; button.disabled=false; button.textContent="Confirmar y firmar documento"; }
+    catch(error){ status.textContent=error.message; button.disabled=false; button.textContent="Firmar documento"; }
   });
 
   function showSigned(){ loading.hidden=true; signed.hidden=false; document.querySelector("#download-signed").href=`/api/sign/${encodeURIComponent(token)}/file`; document.querySelector("#prepare-email").href=`/api/sign/${encodeURIComponent(token)}/email`; }
