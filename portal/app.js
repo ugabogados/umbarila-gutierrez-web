@@ -4,6 +4,10 @@
   let documentPage = 1;
   let casePage = 1;
   let savedEditorRange = null;
+  let livePreviewTimer = null;
+  let livePreviewAbort = null;
+  let livePreviewSequence = 0;
+  let pdfJsPromise = null;
   const DOCUMENT_PAGE_SIZE = 12;
   const CASE_PAGE_SIZE = 15;
   const AUTOMATIC_VARIABLES = new Set(["cliente_nombre","cliente_identificacion","cliente_correo","cliente_telefono","caso_titulo","caso_referencia","caso_descripcion","fecha_larga"]);
@@ -154,13 +158,8 @@
       : `<div class="institutional-background-sample"><strong>UG</strong><span>UMBARILA GUTIÉRREZ &amp; ASOCIADOS</span><small>Fondo institucional predeterminado</small></div>`;
     document.querySelector("#remove-template-background").disabled = !selected.background_key;
     const editor = document.querySelector("#template-rich-editor");
-    const paperUrl = selected.background_key
-      ? `/api/portal/templates/${encodeURIComponent(selected.id)}/background?v=${encodeURIComponent(selected.updated_at || "")}`
-      : "/assets/images/papel-institucional-editor.svg";
-    editor.style.setProperty("--paper-image", `url("${paperUrl}")`);
     editor.innerHTML = sanitizeTemplateHtml(looksLikeHtml(selected.content) ? selected.content : plainToEditorHtml(selected.content));
     syncRichEditor();
-    requestAnimationFrame(updateEditorPageCount);
     renderTemplateVariableList();
   }
 
@@ -201,7 +200,7 @@
     document.querySelectorAll(".view").forEach(panel => panel.classList.toggle("active", panel.dataset.panel === button.dataset.view));
     document.querySelector("#view-title").textContent = button.textContent;
     document.querySelector(".sidebar").classList.remove("open");
-    if (button.dataset.view === "templates") requestAnimationFrame(updateEditorPageCount);
+    if (button.dataset.view === "templates") scheduleTemplatePreview(0);
   });
   document.querySelector("#mobile-nav").addEventListener("click", event => {
     const open = document.querySelector(".sidebar").classList.toggle("open"); event.currentTarget.setAttribute("aria-expanded", String(open));
@@ -214,6 +213,7 @@
 
   document.querySelector("#document-client").addEventListener("change", updateDocumentCases);
   document.querySelector("#document-template").addEventListener("change", renderDocumentVariableFields);
+  document.querySelector("#template-preview-client").addEventListener("change", () => scheduleTemplatePreview(0));
 
   document.querySelector("#clients-list").addEventListener("click", event => {
     const button = event.target.closest("[data-client-document]");
@@ -400,13 +400,65 @@
     const content = sanitizeTemplateHtml(editor.innerHTML);
     document.querySelector("#template-editor textarea[name=content]").value = content;
     renderTemplateVariableList();
-    updateEditorPageCount();
+    scheduleTemplatePreview();
   }
 
-  function updateEditorPageCount() {
-    const editor = document.querySelector("#template-rich-editor");
-    const pages = Math.max(1, Math.ceil(editor.scrollHeight / 1056));
-    document.querySelector("#editor-page-count").textContent = `${pages} página${pages === 1 ? "" : "s"}`;
+  function scheduleTemplatePreview(delay = 650) {
+    clearTimeout(livePreviewTimer);
+    document.querySelector("#editor-page-count").textContent = "Actualizando…";
+    livePreviewTimer = setTimeout(renderTemplateLivePreview, delay);
+  }
+
+  async function renderTemplateLivePreview() {
+    const form = document.querySelector("#template-editor");
+    const pages = document.querySelector("#template-preview-pages");
+    if (!form.elements.templateId.value || !form.elements.content.value) return;
+    const sequence = ++livePreviewSequence;
+    livePreviewAbort?.abort();
+    livePreviewAbort = new AbortController();
+    pages.innerHTML = '<p class="preview-loading">Generando vista final…</p>';
+    try {
+      const response = await fetch("/api/portal/preview", {
+        method:"POST",
+        headers:{ "content-type":"application/json" },
+        credentials:"same-origin",
+        signal:livePreviewAbort.signal,
+        body:JSON.stringify({
+          templateId:form.elements.templateId.value,
+          name:form.elements.name.value,
+          content:form.elements.content.value,
+          clientId:document.querySelector("#template-preview-client").value,
+        }),
+      });
+      if (!response.ok) {
+        const data = (response.headers.get("content-type") || "").includes("json") ? await response.json() : null;
+        throw new Error(data?.error || "No fue posible generar la vista final.");
+      }
+      const pdfjs = await (pdfJsPromise ||= import("/vendor/pdfjs/pdf.min.mjs").then(module => {
+        module.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
+        return module;
+      }));
+      const pdf = await pdfjs.getDocument({ data:await response.arrayBuffer() }).promise;
+      if (sequence !== livePreviewSequence) { await pdf.destroy(); return; }
+      pages.replaceChildren();
+      for (let pageNumber=1; pageNumber<=pdf.numPages; pageNumber++) {
+        const pdfPage = await pdf.getPage(pageNumber);
+        const viewport = pdfPage.getViewport({ scale:1.35 });
+        const canvas = document.createElement("canvas");
+        canvas.className = "template-preview-page";
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        canvas.setAttribute("aria-label", `Página ${pageNumber} de ${pdf.numPages}`);
+        pages.append(canvas);
+        await pdfPage.render({ canvasContext:canvas.getContext("2d", { alpha:false }), viewport }).promise;
+      }
+      document.querySelector("#editor-page-count").textContent = `${pdf.numPages} página${pdf.numPages === 1 ? "" : "s"}`;
+      await pdf.destroy();
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      pages.innerHTML = `<p class="preview-error">${esc(error.message)}</p>`;
+      document.querySelector("#editor-page-count").textContent = "No disponible";
+    }
   }
 
   function looksLikeHtml(content) { return /<(p|div|h[1-3]|ul|ol|li|strong|b|em|i|u|br)\b/i.test(String(content || "")); }
