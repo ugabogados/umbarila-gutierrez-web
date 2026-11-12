@@ -6,7 +6,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const output = path.join(root, "dist");
 await mkdir(output, { recursive: true });
 // Publicar únicamente los recursos de la landing.
-for (const file of ["index.html", "assets", "robots.txt", "sitemap.xml"]) {
+for (const file of ["index.html", "assets", "portal", "robots.txt", "sitemap.xml"]) {
   await cp(path.join(root, file), path.join(output, file), { recursive: true });
 }
 // La URL canónica nunca usa el subdominio temporal de un despliegue.

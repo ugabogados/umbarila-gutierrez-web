@@ -167,6 +167,8 @@ footer .brand { color: white; font-size: 16px; }
 .header nav { gap: 6px; }
 .header nav > a { padding: 10px 14px; border-radius: 24px; font-size: 13px; transition: background .18s ease, color .18s ease; }
 .header nav > a:hover { background: #ffffff12; color: var(--gold); }
+.header .nav-portal { display: inline-flex; align-items: center; gap: 7px; color: #fff; border: 1px solid #ffffff2e; }
+.header .nav-portal:hover { border-color: #edc7738a; }
 .header .nav-cta { background: var(--gold); color: var(--petrol); border-color: var(--gold); margin-left: 8px; }
 .header .nav-cta:hover { background: #f4d796; color: var(--petrol); }
 .menu-bars { display: flex; flex-direction: column; gap: 6px; width: 20px; }
@@ -202,6 +204,7 @@ footer .brand { color: white; font-size: 16px; }
   .header nav { padding: 12px; margin-block: 5px 2px; background: #011b36; border: 1px solid #ffffff24; border-radius: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; box-shadow: 0 12px 30px #00152e38; }
   .header nav > a { color: white; font-size: 14px; border-radius: 10px; padding: 12px; }
   .header nav > a:hover { background: #ffffff10; color: var(--gold); }
+  .header nav > .nav-portal { justify-content: center; border-color: #ffffff24; }
   .header .nav-cta { grid-column: 1 / -1; margin: 4px 0 0; display: flex; justify-content: space-between; background: var(--gold); }
   .carousel-controls { gap: 8px; margin-top: 4px; }
   .carousel-controls button { width: 36px; height: 36px; font-size: 18px; border-color: #022e6830; }

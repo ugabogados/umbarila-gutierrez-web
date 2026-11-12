@@ -1,10 +1,10 @@
 # Umbarila Gutiérrez & Asociados
 
-Sitio estático de la firma. GitHub es la fuente del proyecto.
+Sitio público y portal jurídico interno de la firma. GitHub es la fuente del proyecto.
 
 ## Desarrollo y publicación
 
-Requiere Node.js 18 o posterior. Ejecutar `node scripts/build.mjs` y servir `dist/` desde la raíz de un servidor HTTP. No requiere instalar dependencias de producción. Se conserva el flujo de Cloudflare Pages: rama de producción `main`, comando `node scripts/build.mjs` y directorio `dist`.
+Requiere Node.js 20 o posterior. La landing se compila en `dist/` y Cloudflare Workers sirve tanto los recursos públicos como las rutas privadas del portal.
 
 El build usa `SITE_URL` o `CF_PAGES_URL` para el sitemap. La compilación de producción permite indexación en ugabogados.com. Las ramas de revisión en Pages o SITE_PREVIEW=true permanecen bloqueadas. Esta actualización no cambia el alojamiento ni el dominio.
 
@@ -24,9 +24,9 @@ El build usa `SITE_URL` o `CF_PAGES_URL` para el sitemap. La compilación de pro
 
 El botón flotante indica que el visitante viene de la web. El formulario de asesoría prepara un mensaje con los datos y el consentimiento. El visitante revisa y confirma el envío en WhatsApp; abrirlo no equivale a una recepción confirmada.
 
-El formulario no almacena datos. No hay backend, analítica ni envío automático. Si la apertura es bloqueada, se ofrece un enlace para continuar. Sin JavaScript el formulario permanece deshabilitado y los enlaces directos de contacto siguen disponibles. La sección “Tu experiencia” muestra las dos capturas de testimonios proporcionadas por la firma.
+El formulario público no almacena datos ni realiza envíos automáticos. El backend se limita al portal autenticado y al flujo de firma mediante enlaces individuales. Si la apertura de WhatsApp es bloqueada, se ofrece un enlace para continuar. Sin JavaScript el formulario permanece deshabilitado y los enlaces directos de contacto siguen disponibles. La sección “Tu experiencia” muestra las dos capturas de testimonios proporcionadas por la firma.
 
-La representación requiere los acuerdos descritos en las preguntas frecuentes. Una futura recepción directa en la web requerirá implementar su servidor y mantener el vínculo con la política aprobada de la firma.
+La representación requiere los acuerdos descritos en las preguntas frecuentes. El portal conserva los PDFs y registros asociados en recursos privados de Cloudflare.
 
 ## Navegación móvil
 
@@ -46,3 +46,26 @@ El menú móvil incluye panel de navegación y botón animado. Las entradas de c
 En pantallas de hasta 760 px, la portada se reduce al mensaje principal, la solicitud de asesoría y las garantías. El bloque editorial del emblema se oculta porque repite la marca visible en el encabezado; permanece completo en escritorio. Las garantías se recorren horizontalmente y el encabezado, incluido su menú desplegable, usa el color #011b36.
 
 Referencias: https://developers.google.com/search/docs/appearance/structured-data/organization y https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap
+## Portal interno y desarrollo local
+
+```bash
+npm install
+npm run build
+npx wrangler d1 migrations apply ug-portal-db --local
+npx wrangler dev --local --persist-to .wrangler/state
+```
+
+El portal se abre en `/portal/`. En el primer inicio solicita el código definido
+como `PORTAL_SETUP_TOKEN` para crear la cuenta administradora.
+
+## Recursos de producción
+
+El Worker utiliza:
+
+- D1 mediante el binding `PORTAL_DB` para usuarios, clientes, casos y auditoría.
+- D1 también conserva los PDFs originales y firmados en una tabla privada del portal.
+- Los secretos `PORTAL_SETUP_TOKEN` y `AUDIT_SALT`.
+
+Antes del primer despliegue se debe crear la base D1, reemplazar su identificador
+en `wrangler.jsonc`, aplicar las migraciones y registrar
+los secretos con Wrangler. Nunca se deben guardar contraseñas o secretos en Git.

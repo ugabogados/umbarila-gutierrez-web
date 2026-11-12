@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es-CO">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <meta name="theme-color" content="#011b36" />
+    <title>Portal interno | Umbarila Gutiérrez</title>
+    <link rel="icon" href="/assets/images/simbolo-dorado.png" type="image/png" />
+    <link rel="stylesheet" href="/portal/app.css" />
+    <script src="/portal/app.js" defer></script>
+  </head>
+  <body>
+    <div id="auth-screen" class="auth-shell" hidden>
+      <main class="auth-card">
+        <a class="portal-brand" href="/" aria-label="Volver a la página principal">
+          <img src="/assets/images/simbolo-dorado.png" width="76" height="57" alt="" />
+          <span>UMBARILA GUTIÉRREZ<small>&amp; ASOCIADOS</small></span>
+        </a>
+        <p class="kicker">PORTAL INTERNO</p>
+        <h1 id="auth-title">Acceso del equipo</h1>
+        <p id="auth-copy">Ingresa con las credenciales asignadas por la firma.</p>
+        <form id="login-form" class="stack">
+          <label>Correo electrónico<input name="email" type="email" autocomplete="username" required /></label>
+          <label>Contraseña<input name="password" type="password" autocomplete="current-password" required minlength="12" /></label>
+          <button class="primary" type="submit">Ingresar</button>
+        </form>
+        <form id="setup-form" class="stack" hidden>
+          <label>Nombre completo<input name="name" autocomplete="name" required /></label>
+          <label>Correo administrador<input name="email" type="email" autocomplete="email" required /></label>
+          <label>Contraseña inicial<input name="password" type="password" autocomplete="new-password" required minlength="12" /></label>
+          <label>Código de configuración<input name="setupToken" type="password" required /></label>
+          <button class="primary" type="submit">Crear cuenta administradora</button>
+        </form>
+        <p id="auth-status" class="status" role="status" aria-live="polite"></p>
+        <a class="back-link" href="/">← Volver a ugabogados.com</a>
+      </main>
+    </div>
+
+    <div id="portal-app" class="app-shell" hidden>
+      <aside class="sidebar">
+        <a class="portal-brand compact" href="/">
+          <img src="/assets/images/simbolo-dorado.png" width="58" height="44" alt="" />
+          <span>UG <small>&amp; ASOCIADOS</small></span>
+        </a>
+        <nav id="portal-nav" aria-label="Secciones del portal">
+          <button class="nav-item active" data-view="dashboard">Resumen</button>
+          <button class="nav-item" data-view="pipeline">Pipeline</button>
+          <button class="nav-item" data-view="clients">Clientes</button>
+          <button class="nav-item" data-view="documents">Documentos</button>
+          <button class="nav-item admin-only" data-view="settings">Configuración</button>
+        </nav>
+        <div class="sidebar-user"><strong id="sidebar-name"></strong><span id="sidebar-email"></span><button id="logout-button">Cerrar sesión</button></div>
+      </aside>
+      <main class="portal-main">
+        <header class="portal-header">
+          <div><p class="kicker">GESTIÓN JURÍDICA</p><h1 id="view-title">Resumen</h1></div>
+          <button id="mobile-nav" class="mobile-nav" aria-expanded="false">Menú</button>
+        </header>
+        <p id="global-status" class="status" role="status" aria-live="polite"></p>
+
+        <section class="view active" data-panel="dashboard">
+          <div id="metric-grid" class="metric-grid"></div>
+          <div class="panel"><div class="panel-heading"><div><p class="kicker">CASOS</p><h2>Actividad reciente</h2></div><button class="secondary" data-open="case-dialog">Nuevo caso</button></div><div id="recent-cases" class="list"></div></div>
+        </section>
+
+        <section class="view" data-panel="pipeline">
+          <div class="panel-heading page-actions"><p>Desplaza horizontalmente para consultar cada etapa.</p><button class="secondary admin-only" data-open="stage-dialog">Nueva etapa</button></div>
+          <div id="pipeline-board" class="pipeline-board"></div>
+        </section>
+
+        <section class="view" data-panel="clients">
+          <div class="panel-heading page-actions"><p>Información de contacto y asuntos asociados.</p><button class="primary" data-open="client-dialog">Nuevo cliente</button></div>
+          <div id="clients-list" class="cards-grid"></div>
+        </section>
+
+        <section class="view" data-panel="documents">
+          <div class="panel-heading page-actions"><p>Genera, comparte y consulta documentos firmados.</p><button class="primary" data-open="document-dialog">Generar documento</button></div>
+          <div id="documents-list" class="list"></div>
+        </section>
+
+        <section class="view" data-panel="settings">
+          <div class="settings-grid">
+            <div class="panel"><div class="panel-heading"><div><p class="kicker">USUARIOS</p><h2>Accesos del equipo</h2></div><button class="secondary" data-open="user-dialog">Nuevo usuario</button></div><div id="users-list" class="list"></div></div>
+            <div class="panel"><div class="panel-heading"><div><p class="kicker">PIPELINE</p><h2>Etapas activas</h2></div><button class="secondary" data-open="stage-dialog">Nueva etapa</button></div><div id="stages-list" class="list"></div></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="client-dialog"><form method="dialog" class="dialog-form" data-action="client.create"><div class="dialog-head"><h2>Nuevo cliente</h2><button value="cancel" aria-label="Cerrar">×</button></div><label>Nombre completo<input name="fullName" required /></label><div class="two"><label>Identificación<input name="identification" /></label><label>Teléfono<input name="phone" type="tel" /></label></div><label>Correo electrónico<input name="email" type="email" /></label><label>Notas<textarea name="notes" rows="4"></textarea></label><button class="primary" type="submit">Guardar cliente</button></form></dialog>
+    <dialog id="case-dialog"><form method="dialog" class="dialog-form" data-action="case.create"><div class="dialog-head"><h2>Nuevo caso</h2><button value="cancel" aria-label="Cerrar">×</button></div><label>Cliente<select name="clientId" id="case-client" required></select></label><label>Nombre del caso<input name="title" required /></label><div class="two"><label>Referencia<input name="reference" /></label><label>Etapa<select name="stageId" id="case-stage" required></select></label></div><label>Descripción<textarea name="description" rows="4"></textarea></label><button class="primary" type="submit">Crear caso</button></form></dialog>
+    <dialog id="document-dialog"><form method="dialog" class="dialog-form" data-action="document.create"><div class="dialog-head"><h2>Generar documento</h2><button value="cancel" aria-label="Cerrar">×</button></div><p>Se generarán las instrucciones para otorgar poder conforme a la Ley 2213 de 2022.</p><label>Caso<select name="caseId" id="document-case" required></select></label><button class="primary" type="submit">Generar enlace de firma</button></form></dialog>
+    <dialog id="stage-dialog"><form method="dialog" class="dialog-form" data-action="stage.create"><div class="dialog-head"><h2>Nueva etapa</h2><button value="cancel" aria-label="Cerrar">×</button></div><label>Nombre<input name="name" required /></label><label>Color<input name="color" type="color" value="#edc773" /></label><button class="primary" type="submit">Agregar etapa</button></form></dialog>
+    <dialog id="user-dialog"><form method="dialog" class="dialog-form" data-action="user.create"><div class="dialog-head"><h2>Nuevo usuario</h2><button value="cancel" aria-label="Cerrar">×</button></div><label>Nombre<input name="name" required /></label><label>Correo<input name="email" type="email" required /></label><label>Contraseña temporal<input name="password" type="password" minlength="12" required /></label><label>Rol<select name="role"><option value="staff">Equipo</option><option value="admin">Administrador</option></select></label><button class="primary" type="submit">Crear usuario</button></form></dialog>
+  </body>
+</html>

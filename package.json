@@ -6,6 +6,9 @@
     "build": "node scripts/build.mjs",
     "deploy": "wrangler deploy"
   },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  },
   "devDependencies": {
     "wrangler": "4.129.0"
   }
