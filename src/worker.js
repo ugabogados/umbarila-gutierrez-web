@@ -213,8 +213,8 @@ async function createDocument(env, user, body) {
   const pdf = await buildTemplatePdf(env, template.name, renderedContent);
   const unsignedKey = `documents/${id}/original.pdf`;
   await putFile(env, unsignedKey, pdf, "application/pdf");
-  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token,custom_title,custom_reference,custom_description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000)).run();
+  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token,custom_title,custom_reference,custom_description,email_to,email_subject,email_body) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000), normalizeOptionalEmail(body.emailTo), cleanHeader(body.emailSubject, 200), clean(body.emailBody, 5000)).run();
   await env.PORTAL_DB.prepare("INSERT INTO portal_document_links (id,document_id,token,token_hash,expires_at,created_at,created_by) VALUES (?,?,?,?,?,?,?)")
     .bind(crypto.randomUUID(), id, token, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), now.toISOString(), user.id).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
@@ -270,7 +270,10 @@ async function signingApi(request, env, token, suffix) {
     const eml = buildEmailDraft(doc, bytes);
     return new Response(eml, { headers: { "content-type": "message/rfc822", "content-disposition": "attachment; filename=correo-poder-ley-2213.eml", "cache-control": "no-store" } });
   }
-  if (request.method === "GET") return json({ title: doc.title, clientName: doc.full_name, identification: doc.identification || "", email: doc.email || "", status: doc.status, expiresAt: doc.expires_at });
+  if (request.method === "GET") {
+    const email = emailDraftData(doc);
+    return json({ title: doc.title, clientName: doc.full_name, identification: doc.identification || "", email: doc.email || "", status: doc.status, expiresAt: doc.expires_at, emailTo: email.to, emailSubject: email.subject, emailBody: email.body });
+  }
   if (request.method !== "POST") return json({ error: "Método no permitido." }, 405);
   if (doc.status === "signed") return json({ ok: true, alreadySigned: true });
   const body = await readJson(request);
@@ -395,14 +398,18 @@ function drawWrapped(page, text, x, y, width, size, font, color, lineHeight) {
 }
 
 function buildEmailDraft(doc, pdfBytes) {
-  const boundary = `ug-${crypto.randomUUID()}`;
-  const isPower = doc.template_id === "template-special-power" || /poder/i.test(doc.title || "");
-  const subject = isPower ? "PODER ESPECIAL - LEY 2213 DE 2022" : `DOCUMENTO FIRMADO - ${String(doc.title || "DOCUMENTO").toUpperCase()}`;
-  const body = isPower
-    ? "En cumplimiento de lo dispuesto en la Ley 2213 del 13 de junio de 2022, y de conformidad con lo establecido en su artículo 5.º, por medio del presente escrito confiero poder especial, amplio y suficiente a los abogados relacionados en el documento adjunto, para que, en mi nombre y representación, promuevan, adelanten y lleven hasta su culminación el medio de control de nulidad y restablecimiento del derecho en contra de la Subred Integrada de Servicios de Salud Sur Occidente E.S.E., con las facultades inherentes al ejercicio del presente mandato."
-    : `Adjunto remito el documento ${doc.title || "solicitado"}, debidamente firmado, para su revisión y trámite correspondiente.`;
+  const boundary = `ug-${crypto.randomUUID()}`; const { to, subject, body } = emailDraftData(doc);
   const base64 = bytesToBase64(pdfBytes).replace(/(.{76})/g, "$1\r\n");
-  return [`To: umbarilagutierrez.asoc@gmail.com`, `Subject: ${subject}`, "MIME-Version: 1.0", `Content-Type: multipart/mixed; boundary=\"${boundary}\"`, "", `--${boundary}`, "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit", "", body, "", `--${boundary}`, "Content-Type: application/pdf; name=\"documento-firmado.pdf\"", "Content-Transfer-Encoding: base64", "Content-Disposition: attachment; filename=\"documento-firmado.pdf\"", "", base64, `--${boundary}--`, ""].join("\r\n");
+  return [`To: ${to}`, `Subject: ${subject}`, "MIME-Version: 1.0", `Content-Type: multipart/mixed; boundary=\"${boundary}\"`, "", `--${boundary}`, "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit", "", body, "", `--${boundary}`, "Content-Type: application/pdf; name=\"documento-firmado.pdf\"", "Content-Transfer-Encoding: base64", "Content-Disposition: attachment; filename=\"documento-firmado.pdf\"", "", base64, `--${boundary}--`, ""].join("\r\n");
+}
+
+function emailDraftData(doc) {
+  const isPower = doc.template_id === "template-special-power" || /poder/i.test(doc.title || "");
+  return {
+    to: normalizeOptionalEmail(doc.email_to) || "umbarilagutierrez.asoc@gmail.com",
+    subject: cleanHeader(doc.email_subject, 200) || (isPower ? "PODER ESPECIAL - LEY 2213 DE 2022" : `DOCUMENTO FIRMADO - ${String(doc.title || "DOCUMENTO").toUpperCase()}`),
+    body: clean(doc.email_body, 5000) || (isPower ? "En cumplimiento de lo dispuesto en la Ley 2213 del 13 de junio de 2022, y de conformidad con lo establecido en su artículo 5.º, por medio del presente escrito confiero poder especial, amplio y suficiente a los abogados relacionados en el documento adjunto, para que, en mi nombre y representación, promuevan, adelanten y lleven hasta su culminación el medio de control de nulidad y restablecimiento del derecho en contra de la Subred Integrada de Servicios de Salud Sur Occidente E.S.E., con las facultades inherentes al ejercicio del presente mandato." : `Adjunto remito el documento ${doc.title || "solicitado"}, debidamente firmado, para su revisión y trámite correspondiente.`),
+  };
 }
 
 async function putFile(env, key, bytes, contentType, metadata = null) {
@@ -457,6 +464,7 @@ function cookieValue(request, name) { const match = request.headers.get("cookie"
 function normalizeEmail(value) { return String(value || "").trim().toLowerCase(); }
 function normalizeOptionalEmail(value) { const email=normalizeEmail(value); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : ""; }
 function clean(value, max) { return String(value || "").trim().slice(0,max); }
+function cleanHeader(value, max) { return clean(value, max).replace(/[\r\n]+/g, " "); }
 function safeColor(value) { return /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#edc773"; }
 function safeFilename(value) { return String(value || "documento").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,"").toLowerCase(); }
 async function readJson(request) { try { return await request.json(); } catch { return {}; } }

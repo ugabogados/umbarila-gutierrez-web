@@ -9,6 +9,7 @@
   let drawing = false;
   let hasSignature = false;
   let signerData = { name: "", identification: "", email: "" };
+  let emailData = { to: "", subject: "Documento firmado", body: "Adjunto remito el documento debidamente firmado." };
 
   async function api(path, options) {
     const response = await fetch(path, { ...options, headers: { "content-type": "application/json" } });
@@ -25,6 +26,7 @@
       signing.hidden = false;
       document.querySelector("#document-title").textContent = data.title || "Documento para firma";
       signerData = { name: data.clientName || "", identification: data.identification || "", email: data.email || "" };
+      emailData = { to:data.emailTo || "", subject:data.emailSubject || "Documento firmado", body:data.emailBody || "Adjunto remito el documento debidamente firmado." };
       document.querySelector("#review-document").href = `/api/sign/${encodeURIComponent(token)}/file`;
       prepareCanvas();
     } catch (error) {
@@ -63,7 +65,8 @@
       const response = await fetch(`/api/sign/${encodeURIComponent(token)}/file`);
       if (!response.ok) throw new Error("No fue posible preparar el documento firmado.");
       const file = new File([await response.blob()], "documento-firmado.pdf", { type:"application/pdf" });
-      const shareData = { title:"Documento firmado", text:"Adjunto remito el documento debidamente firmado.", files:[file] };
+      const recipientLine = emailData.to ? `Destinatario: ${emailData.to}\n\n` : "";
+      const shareData = { title:emailData.subject, text:`${recipientLine}${emailData.body}`, files:[file] };
       if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
         await navigator.share(shareData);
         status.textContent = "Documento entregado a la aplicación seleccionada.";
