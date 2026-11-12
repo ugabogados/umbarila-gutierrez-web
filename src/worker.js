@@ -205,8 +205,8 @@ async function createDocument(env, user, body) {
   const pdf = await buildTemplatePdf(env, template.name, renderedContent);
   const unsignedKey = `documents/${id}/original.pdf`;
   await putFile(env, unsignedKey, pdf, "application/pdf");
-  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token).run();
+  await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token,custom_title,custom_reference,custom_description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000)).run();
   await env.PORTAL_DB.prepare("INSERT INTO portal_document_links (id,document_id,token,token_hash,expires_at,created_at,created_by) VALUES (?,?,?,?,?,?,?)")
     .bind(crypto.randomUUID(), id, token, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), now.toISOString(), user.id).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
@@ -239,6 +239,9 @@ async function documentContext(env, body, allowSample = false) {
   } else if (allowSample) {
     record = { client_id: null, full_name: "NOMBRE DEL CLIENTE", identification: "NÚMERO DE IDENTIFICACIÓN", email: "correo@ejemplo.com", phone: "300 000 0000", case_id: null, title: "ASUNTO JURÍDICO", reference: "REFERENCIA DEL PROCESO", description: "DESCRIPCIÓN DEL OBJETO O ACTUACIÓN JURÍDICA" };
   } else return { error: "Selecciona un cliente para generar el documento.", status: 400 };
+  record.title = clean(body.customTitle, 500) || record.title;
+  record.reference = clean(body.customReference, 500) || record.reference;
+  record.description = clean(body.customDescription, 5000) || record.description;
   return { record, template };
 }
 

@@ -191,7 +191,8 @@
   });
 
   document.querySelector("#preview-document").addEventListener("click", () => {
-    previewPdf({ templateId: document.querySelector("#document-template").value, clientId: document.querySelector("#document-client").value, caseId: document.querySelector("#document-case").value });
+    const form = document.querySelector("#document-dialog form");
+    previewPdf(Object.fromEntries(new FormData(form)));
   });
 
   function updateDocumentCases() {
