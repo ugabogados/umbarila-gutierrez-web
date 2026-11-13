@@ -4,6 +4,7 @@ import { DEFAULT_TEMPLATES } from "./templates.js";
 const SESSION_COOKIE = "ug_portal_session";
 const SESSION_DAYS = 14;
 const SIGNING_DAYS = 30;
+const DEFAULT_DOCUMENT_BACKGROUND = "asset:/assets/images/membrete-documentos.jpg";
 const encoder = new TextEncoder();
 
 export default {
@@ -46,8 +47,7 @@ async function handleApi(request, env, url) {
   if (url.pathname === "/api/portal/preview" && request.method === "POST") return previewDocument(request, env);
   if (url.pathname === "/api/portal/actions" && request.method === "POST") return actions(request, env, user);
 
-  const backgroundMatch = url.pathname.match(/^\/api\/portal\/templates\/([^/]+)\/background$/);
-  if (backgroundMatch && request.method === "GET") return templateBackground(env, backgroundMatch[1]);
+  if (url.pathname === "/api/portal/settings/document-background" && request.method === "GET") return documentBackground(env);
 
   const fileMatch = url.pathname.match(/^\/api\/portal\/documents\/([^/]+)\/file$/);
   if (fileMatch && request.method === "GET") return internalDocument(env, fileMatch[1]);
@@ -116,16 +116,17 @@ async function snapshot(env, user) {
   await ensureTemplates(env);
   await env.PORTAL_DB.prepare("UPDATE portal_documents SET status='expired',updated_at=? WHERE status='pending' AND deleted_at IS NULL AND expires_at<=?")
     .bind(new Date().toISOString(), new Date().toISOString()).run();
-  const [clients, stages, cases, documents, users, templates, documentLinks] = await Promise.all([
+  const [clients, stages, cases, documents, users, templates, documentLinks, documentBackgroundSetting] = await Promise.all([
     env.PORTAL_DB.prepare("SELECT * FROM portal_clients ORDER BY updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT * FROM portal_stages WHERE active=1 ORDER BY position").all(),
     env.PORTAL_DB.prepare("SELECT c.*,cl.full_name AS client_name,s.name AS stage_name FROM portal_cases c JOIN portal_clients cl ON cl.id=c.client_id JOIN portal_stages s ON s.id=c.stage_id ORDER BY c.updated_at DESC").all(),
     env.PORTAL_DB.prepare("SELECT d.*,cl.full_name AS client_name,COALESCE(c.title,'Sin caso asociado') AS case_title FROM portal_documents d JOIN portal_clients cl ON cl.id=d.client_id LEFT JOIN portal_cases c ON c.id=d.case_id WHERE d.deleted_at IS NULL ORDER BY d.updated_at DESC").all(),
     user.role === "admin" ? env.PORTAL_DB.prepare("SELECT id,email,name,role,active,created_at FROM portal_users ORDER BY name").all() : Promise.resolve({ results: [] }),
-    env.PORTAL_DB.prepare("SELECT id,name,description,content,background_key,active,updated_at FROM portal_templates WHERE active=1 ORDER BY name").all(),
+    env.PORTAL_DB.prepare("SELECT id,name,description,content,active,updated_at FROM portal_templates WHERE active=1 ORDER BY name").all(),
     env.PORTAL_DB.prepare("SELECT l.id,l.document_id,l.token,l.expires_at,l.created_at,l.revoked_at,l.used_at FROM portal_document_links l JOIN portal_documents d ON d.id=l.document_id WHERE d.deleted_at IS NULL ORDER BY l.created_at DESC").all(),
+    env.PORTAL_DB.prepare("SELECT value,updated_at FROM portal_settings WHERE key='document_background'").first(),
   ]);
-  return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, documentLinks: documentLinks.results, users: users.results, templates: templates.results });
+  return json({ user, clients: clients.results, stages: stages.results, cases: cases.results, documents: documents.results, documentLinks: documentLinks.results, users: users.results, templates: templates.results, settings: { documentBackgroundCustom:Boolean(documentBackgroundSetting?.value), documentBackgroundUpdatedAt:documentBackgroundSetting?.updated_at || "default" } });
 }
 
 async function actions(request, env, user) {
@@ -218,9 +219,7 @@ async function actions(request, env, user) {
     await audit(env, null, user.id, "template.deleted", `Plantilla retirada: ${template.name}. Los documentos creados se conservaron.`);
     return json({ ok: true });
   }
-  if (body.action === "template.background.update") {
-    const template = await env.PORTAL_DB.prepare("SELECT id FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
-    if (!template) return json({ error: "No se encontró la plantilla." }, 404);
+  if (body.action === "settings.document-background.update") {
     const contentType = String(body.contentType || "").toLowerCase();
     if (!['image/png','image/jpeg'].includes(contentType)) return json({ error: "El fondo debe ser una imagen PNG o JPG." }, 400);
     let bytes;
@@ -229,16 +228,18 @@ async function actions(request, env, user) {
     const validPng = contentType === "image/png" && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
     const validJpeg = contentType === "image/jpeg" && bytes[0] === 0xff && bytes[1] === 0xd8;
     if (!validPng && !validJpeg) return json({ error: "La imagen seleccionada no es válida." }, 400);
-    const key = `template-backgrounds/${template.id}/${crypto.randomUUID()}.${contentType === "image/png" ? "png" : "jpg"}`;
+    const dimensions = imageDimensions(bytes, contentType);
+    if (!dimensions || dimensions.width < 500 || dimensions.height < 650 || dimensions.width / dimensions.height < .68 || dimensions.width / dimensions.height > .85) return json({ error: "El membrete debe ser una imagen vertical con proporción carta." }, 400);
+    if (contentType === "image/png" && dimensions.width * dimensions.height > 4000000) return json({ error: "El PNG es demasiado grande para generar PDF. Conviértelo a JPG o usa máximo 4 millones de píxeles." }, 413);
+    const key = `document-backgrounds/global/${crypto.randomUUID()}.${contentType === "image/png" ? "png" : "jpg"}`;
     await putFile(env, key, bytes, contentType);
-    await env.PORTAL_DB.prepare("UPDATE portal_templates SET background_key=?,updated_at=?,updated_by=? WHERE id=?").bind(key, now, user.id, template.id).run();
-    await audit(env, null, user.id, "template.background.updated", `Fondo actualizado: ${template.id}`);
+    await env.PORTAL_DB.prepare("INSERT INTO portal_settings (key,value,updated_at,updated_by) VALUES ('document_background',?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at,updated_by=excluded.updated_by").bind(key, now, user.id).run();
+    await audit(env, null, user.id, "settings.document-background.updated", "Membrete general de documentos actualizado");
     return json({ ok: true });
   }
-  if (body.action === "template.background.remove") {
-    const result = await env.PORTAL_DB.prepare("UPDATE portal_templates SET background_key=NULL,updated_at=?,updated_by=? WHERE id=? AND active=1").bind(now, user.id, body.templateId).run();
-    if (!result.meta.changes) return json({ error: "No se encontró la plantilla." }, 404);
-    await audit(env, null, user.id, "template.background.removed", `Fondo institucional restaurado: ${body.templateId}`);
+  if (body.action === "settings.document-background.remove") {
+    await env.PORTAL_DB.prepare("DELETE FROM portal_settings WHERE key='document_background'").run();
+    await audit(env, null, user.id, "settings.document-background.removed", "Membrete general predeterminado restaurado");
     return json({ ok: true });
   }
   if (body.action === "document.link.regenerate") {
@@ -275,11 +276,12 @@ async function createDocument(env, user, body) {
   const variables = sanitizeVariables(body.variables);
   const id = crypto.randomUUID(); const token = randomToken(9); const now = new Date();
   const renderedContent = renderTemplate(template.content, record, variables);
-  const pdf = await buildTemplatePdf(env, template.name, renderedContent, template.background_key);
+  const backgroundKey = await documentBackgroundKey(env);
+  const pdf = await buildTemplatePdf(env, template.name, renderedContent, backgroundKey);
   const unsignedKey = `documents/${id}/original.pdf`;
   await putFile(env, unsignedKey, pdf, "application/pdf");
   await env.PORTAL_DB.prepare("INSERT INTO portal_documents (id,case_id,client_id,title,status,unsigned_key,signing_token_hash,expires_at,created_by,created_at,updated_at,template_id,template_name,content_snapshot,signing_token,custom_title,custom_reference,custom_description,email_to,email_subject,email_body,variables_snapshot,background_key_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000), normalizeOptionalEmail(body.emailTo), cleanHeader(body.emailSubject, 200), clean(body.emailBody, 5000), JSON.stringify(variables), template.background_key || null).run();
+    .bind(id, record.case_id, record.client_id, template.name, "pending", unsignedKey, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), user.id, now.toISOString(), now.toISOString(), template.id, template.name, renderedContent, token, clean(body.customTitle, 500), clean(body.customReference, 500), clean(body.customDescription, 5000), normalizeOptionalEmail(body.emailTo), cleanHeader(body.emailSubject, 200), clean(body.emailBody, 5000), JSON.stringify(variables), backgroundKey).run();
   await env.PORTAL_DB.prepare("INSERT INTO portal_document_links (id,document_id,token,token_hash,expires_at,created_at,created_by) VALUES (?,?,?,?,?,?,?)")
     .bind(crypto.randomUUID(), id, token, await sha256(token), new Date(now.getTime() + SIGNING_DAYS * 86400000).toISOString(), now.toISOString(), user.id).run();
   await audit(env, id, user.id, "document.created", "Documento generado");
@@ -294,12 +296,12 @@ async function previewDocument(request, env) {
   if (context.error) return json({ error: context.error }, context.status);
   const content = body.content ? String(body.content).slice(0, 100000) : context.template.content;
   const name = clean(body.name, 160) || context.template.name;
-  const pdf = await buildTemplatePdf(env, name, renderTemplate(content, context.record, sanitizeVariables(body.variables)), context.template.background_key);
+  const pdf = await buildTemplatePdf(env, name, renderTemplate(content, context.record, sanitizeVariables(body.variables)), await documentBackgroundKey(env));
   return new Response(pdf, { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename=\"${safeFilename(name)}.pdf\"`, "cache-control": "no-store" } });
 }
 
 async function documentContext(env, body, allowSample = false) {
-  const template = await env.PORTAL_DB.prepare("SELECT id,name,description,content,background_key FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
+  const template = await env.PORTAL_DB.prepare("SELECT id,name,description,content FROM portal_templates WHERE id=? AND active=1").bind(body.templateId).first();
   if (!template) return { error: "Selecciona una plantilla.", status: 400 };
   const caseId = clean(body.caseId, 80) || null;
   let record;
@@ -324,10 +326,10 @@ async function internalDocument(env, id) {
   return storedFile(env, row.signed_key || row.unsigned_key, `${safeFilename(row.title)}.pdf`, "inline");
 }
 
-async function templateBackground(env, id) {
-  const template = await env.PORTAL_DB.prepare("SELECT background_key FROM portal_templates WHERE id=? AND active=1").bind(id).first();
-  if (!template?.background_key) return json({ error: "Esta plantilla utiliza el fondo institucional." }, 404);
-  return storedFile(env, template.background_key, "fondo-plantilla", "inline");
+async function documentBackground(env) {
+  const key = await documentBackgroundKey(env);
+  if (key.startsWith("asset:")) return env.ASSETS.fetch(new Request(`https://assets.local${key.slice(6)}`));
+  return storedFile(env, key, "membrete-documentos", "inline");
 }
 
 async function signingApi(request, env, token, suffix) {
@@ -410,7 +412,7 @@ async function buildTemplatePdf(env, title, content, backgroundKey = null) {
   } catch {}
   if (backgroundKey) {
     try {
-      const object = await getFile(env, backgroundKey); const bytes = new Uint8Array(object.data);
+      const object = await documentBackgroundFile(env, backgroundKey); const bytes = new Uint8Array(object.data);
       background = object.content_type === "image/png" ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
     } catch { background = null; }
   }
@@ -682,7 +684,7 @@ async function addSignature(env, original, signatureDataUrl, signer, backgroundK
     let customBackground = null;
     if (backgroundKey) {
       try {
-        const object = await getFile(env, backgroundKey); const bytes = new Uint8Array(object.data);
+        const object = await documentBackgroundFile(env, backgroundKey); const bytes = new Uint8Array(object.data);
         customBackground = object.content_type === "image/png" ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
       } catch { customBackground = null; }
     }
@@ -747,6 +749,48 @@ async function putFile(env, key, bytes, contentType, metadata = null) {
   const data = bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes;
   await env.PORTAL_DB.prepare("INSERT OR REPLACE INTO portal_files (key,data,content_type,metadata,created_at) VALUES (?,?,?,?,?)")
     .bind(key, data, contentType, metadata ? JSON.stringify(metadata) : null, new Date().toISOString()).run();
+}
+
+async function documentBackgroundKey(env) {
+  const setting = await env.PORTAL_DB.prepare("SELECT value FROM portal_settings WHERE key='document_background'").first();
+  return setting?.value || DEFAULT_DOCUMENT_BACKGROUND;
+}
+
+async function documentBackgroundFile(env, key) {
+  if (String(key || "").startsWith("asset:")) {
+    const response = await env.ASSETS.fetch(new Request(`https://assets.local${String(key).slice(6)}`));
+    if (!response.ok) throw new Error("No se encontró el membrete predeterminado.");
+    return { data:await response.arrayBuffer(), content_type:response.headers.get("content-type") || "image/jpeg" };
+  }
+  const object = await getFile(env, key);
+  if (!object) throw new Error("No se encontró el membrete configurado.");
+  if (object.content_type === "image/png") {
+    const bytes = new Uint8Array(object.data); const dimensions = imageDimensions(bytes, object.content_type);
+    if (dimensions && dimensions.width * dimensions.height > 4000000) return documentBackgroundFile(env, DEFAULT_DOCUMENT_BACKGROUND);
+  }
+  return object;
+}
+
+function imageDimensions(bytes, contentType) {
+  if (contentType === "image/png" && bytes.length >= 24) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return { width:view.getUint32(16), height:view.getUint32(20) };
+  }
+  if (contentType === "image/jpeg" && bytes.length >= 10) {
+    let offset = 2;
+    while (offset + 8 < bytes.length) {
+      if (bytes[offset] !== 0xff) { offset++; continue; }
+      const marker = bytes[offset + 1];
+      if (marker === 0xd8 || marker === 0xd9) { offset += 2; continue; }
+      const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
+      if (length < 2 || offset + length + 2 > bytes.length) return null;
+      if ([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)) {
+        return { height:(bytes[offset + 5] << 8) | bytes[offset + 6], width:(bytes[offset + 7] << 8) | bytes[offset + 8] };
+      }
+      offset += length + 2;
+    }
+  }
+  return null;
 }
 
 async function getFile(env, key) {

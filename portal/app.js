@@ -1,5 +1,5 @@
 (() => {
-  const state = { user: null, clients: [], stages: [], cases: [], documents: [], documentLinks: [], templates: [], users: [] };
+  const state = { user: null, clients: [], stages: [], cases: [], documents: [], documentLinks: [], templates: [], users: [], settings: {} };
   let activeTemplateId = null;
   let documentPage = 1;
   let casePage = 1;
@@ -10,6 +10,7 @@
   let livePreviewRevision = 0;
   let livePreviewRetryCount = 0;
   let lastPreviewKey = "";
+  let lastPreviewPageCount = 0;
   let pdfJsPromise = null;
   const DOCUMENT_PAGE_SIZE = 12;
   const CASE_PAGE_SIZE = 15;
@@ -161,11 +162,6 @@
     form.elements.templateId.value = selected.id;
     form.elements.name.value = selected.name;
     form.elements.description.value = selected.description || "";
-    const backgroundPreview = document.querySelector("#template-background-preview");
-    backgroundPreview.innerHTML = selected.background_key
-      ? `<img src="/api/portal/templates/${encodeURIComponent(selected.id)}/background?v=${encodeURIComponent(selected.updated_at || "")}" alt="Fondo personalizado de ${esc(selected.name)}" />`
-      : `<div class="institutional-background-sample"><strong>UG</strong><span>UMBARILA GUTIÉRREZ &amp; ASOCIADOS</span><small>Fondo institucional predeterminado</small></div>`;
-    document.querySelector("#remove-template-background").disabled = !selected.background_key;
     const editor = document.querySelector("#template-rich-editor");
     editor.innerHTML = sanitizeTemplateHtml(looksLikeHtml(selected.content) ? selected.content : plainToEditorHtml(selected.content));
     decorateVariableTokens(editor);
@@ -176,6 +172,8 @@
   function renderSettings() {
     document.querySelector("#users-list").innerHTML = state.users.map(item => `<article class="list-row"><div><strong>${esc(item.name)}</strong><small>${esc(item.email)}</small></div><span class="badge">${item.role === "admin" ? "Administrador" : "Equipo"}</span></article>`).join("") || empty("No hay usuarios adicionales.");
     document.querySelector("#stages-list").innerHTML = state.stages.map(item => `<article class="list-row"><div><strong>${esc(item.name)}</strong><small>Posición ${item.position}</small></div><span style="width:18px;height:18px;border-radius:50%;background:${esc(item.color)}"></span></article>`).join("");
+    document.querySelector("#document-background-preview").innerHTML = `<img src="/api/portal/settings/document-background?v=${encodeURIComponent(state.settings?.documentBackgroundUpdatedAt || "default")}" alt="Membrete general de los documentos" />`;
+    document.querySelector("#remove-document-background").disabled = !state.settings?.documentBackgroundCustom;
   }
 
   function fillSelects() {
@@ -269,22 +267,23 @@
     } catch (error) { event.currentTarget.disabled = false; setStatus(globalStatus, error.message); }
   });
 
-  document.querySelector("#template-background-file").addEventListener("change", async event => {
+  document.querySelector("#document-background-file").addEventListener("change", async event => {
     const file = event.target.files?.[0]; if (!file) return;
     if (!['image/png','image/jpeg'].includes(file.type)) { setStatus(globalStatus, "Selecciona una imagen PNG o JPG."); event.target.value = ""; return; }
     if (file.size > 3500000) { setStatus(globalStatus, "La imagen debe pesar menos de 3,5 MB."); event.target.value = ""; return; }
-    setStatus(globalStatus, "Guardando el fondo…", true);
+    setStatus(globalStatus, "Optimizando y guardando el membrete…", true);
     try {
-      await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"template.background.update", templateId:activeTemplateId, contentType:file.type, data:await fileBase64(file) }) });
-      event.target.value = ""; await refresh("Fondo de la plantilla actualizado.");
+      const prepared = await prepareDocumentBackground(file);
+      await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"settings.document-background.update", contentType:prepared.type, data:await fileBase64(prepared) }) });
+      event.target.value = ""; await refresh("Membrete general actualizado para los documentos nuevos.");
     } catch (error) { event.target.value = ""; setStatus(globalStatus, error.message); }
   });
-  document.querySelector("#remove-template-background").addEventListener("click", async event => {
-    if (!confirm("¿Restaurar el fondo institucional para esta plantilla?")) return;
+  document.querySelector("#remove-document-background").addEventListener("click", async event => {
+    if (!confirm("¿Restaurar el membrete general predeterminado para los documentos nuevos?")) return;
     event.currentTarget.disabled = true;
     try {
-      await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"template.background.remove", templateId:activeTemplateId }) });
-      await refresh("Fondo institucional restaurado.");
+      await api("/api/portal/actions", { method:"POST", body:JSON.stringify({ action:"settings.document-background.remove" }) });
+      await refresh("Membrete general predeterminado restaurado.");
     } catch (error) { event.currentTarget.disabled = false; setStatus(globalStatus, error.message); }
   });
 
@@ -486,6 +485,7 @@
     const previewKey = JSON.stringify(payload);
     if (previewKey === lastPreviewKey && pages.querySelector("canvas")) {
       livePreviewDirty = false;
+      document.querySelector("#editor-page-count").textContent = `${lastPreviewPageCount} página${lastPreviewPageCount === 1 ? "" : "s"}`;
       return;
     }
     livePreviewRunning = true;
@@ -527,6 +527,7 @@
       if (revision !== livePreviewRevision) { livePreviewDirty = true; return; }
       pages.replaceChildren(renderedPages);
       lastPreviewKey = previewKey;
+      lastPreviewPageCount = pdf.numPages;
       livePreviewRetryCount = 0;
       document.querySelector("#editor-page-count").textContent = `${pdf.numPages} página${pdf.numPages === 1 ? "" : "s"}`;
     } catch (error) {
@@ -639,6 +640,20 @@
     const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
     for (let index=0; index<bytes.length; index+=8192) binary += String.fromCharCode(...bytes.subarray(index,index+8192));
     return btoa(binary);
+  }
+
+  async function prepareDocumentBackground(file) {
+    const bitmap = await createImageBitmap(file);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width; canvas.height = bitmap.height;
+      const context = canvas.getContext("2d", { alpha:false });
+      context.fillStyle = "#ffffff"; context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(bitmap, 0, 0);
+      const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("No fue posible optimizar el membrete.")), "image/jpeg", .92));
+      if (blob.size > 3500000) throw new Error("El membrete optimizado supera 3,5 MB.");
+      return blob;
+    } finally { bitmap.close(); }
   }
 
   document.querySelectorAll("dialog form[data-action]").forEach(form => form.addEventListener("submit", async event => {
