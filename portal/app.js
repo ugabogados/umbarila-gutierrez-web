@@ -5,8 +5,11 @@
   let casePage = 1;
   let savedEditorRange = null;
   let livePreviewTimer = null;
-  let livePreviewAbort = null;
-  let livePreviewSequence = 0;
+  let livePreviewRunning = false;
+  let livePreviewDirty = false;
+  let livePreviewRevision = 0;
+  let livePreviewRetryCount = 0;
+  let lastPreviewKey = "";
   let pdfJsPromise = null;
   const DOCUMENT_PAGE_SIZE = 12;
   const CASE_PAGE_SIZE = 15;
@@ -143,7 +146,9 @@
       document.querySelector("#templates-list").innerHTML = empty("No hay plantillas disponibles.");
       activeTemplateId = null;
       form.hidden = true;
-      if (livePreviewAbort) livePreviewAbort.abort();
+      clearTimeout(livePreviewTimer);
+      livePreviewRevision++;
+      livePreviewDirty = false;
       return;
     }
     form.hidden = false;
@@ -219,6 +224,11 @@
   document.querySelector("#document-client").addEventListener("change", updateDocumentCases);
   document.querySelector("#document-template").addEventListener("change", renderDocumentVariableFields);
   document.querySelector("#template-preview-client").addEventListener("change", () => scheduleTemplatePreview(0));
+  document.querySelector("#template-preview-pages").addEventListener("click", event => {
+    if (!event.target.closest("[data-retry-preview]")) return;
+    livePreviewRetryCount = 0;
+    scheduleTemplatePreview(0);
+  });
 
   document.querySelector("#clients-list").addEventListener("click", event => {
     const button = event.target.closest("[data-client-document]");
@@ -451,9 +461,13 @@
     scheduleTemplatePreview();
   }
 
-  function scheduleTemplatePreview(delay = 650) {
+  function scheduleTemplatePreview(delay = 650, preserveRetry = false) {
     clearTimeout(livePreviewTimer);
-    document.querySelector("#editor-page-count").textContent = "Actualizando…";
+    if (!preserveRetry) livePreviewRetryCount = 0;
+    livePreviewRevision++;
+    livePreviewDirty = true;
+    document.querySelector("#editor-page-count").textContent = livePreviewRunning ? "Cambios pendientes…" : "Actualizando…";
+    if (livePreviewRunning) return;
     livePreviewTimer = setTimeout(renderTemplateLivePreview, delay);
   }
 
@@ -461,34 +475,44 @@
     const form = document.querySelector("#template-editor");
     const pages = document.querySelector("#template-preview-pages");
     if (!form.elements.templateId.value || !form.elements.content.value) return;
-    const sequence = ++livePreviewSequence;
-    livePreviewAbort?.abort();
-    livePreviewAbort = new AbortController();
-    pages.innerHTML = '<p class="preview-loading">Generando vista final…</p>';
+    if (livePreviewRunning) { livePreviewDirty = true; return; }
+    const revision = livePreviewRevision;
+    const payload = {
+      templateId:form.elements.templateId.value,
+      name:form.elements.name.value,
+      content:form.elements.content.value,
+      clientId:document.querySelector("#template-preview-client").value,
+    };
+    const previewKey = JSON.stringify(payload);
+    if (previewKey === lastPreviewKey && pages.querySelector("canvas")) {
+      livePreviewDirty = false;
+      return;
+    }
+    livePreviewRunning = true;
+    livePreviewDirty = false;
+    const hadPreview = Boolean(pages.querySelector("canvas"));
+    if (!hadPreview) pages.innerHTML = '<p class="preview-loading">Generando vista final…</p>';
+    const controller = new AbortController();
+    const requestTimeout = setTimeout(() => controller.abort(), 25000);
+    let retryDelay = 0;
+    let pdf = null;
     try {
       const response = await fetch("/api/portal/preview", {
         method:"POST",
         headers:{ "content-type":"application/json" },
         credentials:"same-origin",
-        signal:livePreviewAbort.signal,
-        body:JSON.stringify({
-          templateId:form.elements.templateId.value,
-          name:form.elements.name.value,
-          content:form.elements.content.value,
-          clientId:document.querySelector("#template-preview-client").value,
-        }),
+        signal:controller.signal,
+        body:previewKey,
       });
       if (!response.ok) {
         const data = (response.headers.get("content-type") || "").includes("json") ? await response.json() : null;
-        throw new Error(data?.error || "No fue posible generar la vista final.");
+        const requestError = new Error(data?.error || "No fue posible generar la vista final.");
+        requestError.retryable = response.status === 429 || response.status >= 500;
+        throw requestError;
       }
-      const pdfjs = await (pdfJsPromise ||= import("/vendor/pdfjs/pdf.min.mjs").then(module => {
-        module.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
-        return module;
-      }));
-      const pdf = await pdfjs.getDocument({ data:await response.arrayBuffer() }).promise;
-      if (sequence !== livePreviewSequence) { await pdf.destroy(); return; }
-      pages.replaceChildren();
+      const pdfjs = await loadPdfJs();
+      pdf = await pdfjs.getDocument({ data:await response.arrayBuffer() }).promise;
+      const renderedPages = document.createDocumentFragment();
       for (let pageNumber=1; pageNumber<=pdf.numPages; pageNumber++) {
         const pdfPage = await pdf.getPage(pageNumber);
         const viewport = pdfPage.getViewport({ scale:1.35 });
@@ -497,16 +521,43 @@
         canvas.width = Math.ceil(viewport.width);
         canvas.height = Math.ceil(viewport.height);
         canvas.setAttribute("aria-label", `Página ${pageNumber} de ${pdf.numPages}`);
-        pages.append(canvas);
+        renderedPages.append(canvas);
         await pdfPage.render({ canvasContext:canvas.getContext("2d", { alpha:false }), viewport }).promise;
       }
+      if (revision !== livePreviewRevision) { livePreviewDirty = true; return; }
+      pages.replaceChildren(renderedPages);
+      lastPreviewKey = previewKey;
+      livePreviewRetryCount = 0;
       document.querySelector("#editor-page-count").textContent = `${pdf.numPages} página${pdf.numPages === 1 ? "" : "s"}`;
-      await pdf.destroy();
     } catch (error) {
-      if (error.name === "AbortError") return;
-      pages.innerHTML = `<p class="preview-error">${esc(error.message)}</p>`;
-      document.querySelector("#editor-page-count").textContent = "No disponible";
+      if (revision !== livePreviewRevision) { livePreviewDirty = true; return; }
+      const retryable = error.name === "AbortError" || error.retryable || error instanceof TypeError;
+      if (retryable && livePreviewRetryCount < 2) {
+        livePreviewRetryCount++;
+        retryDelay = livePreviewRetryCount * 700;
+        livePreviewDirty = true;
+        document.querySelector("#editor-page-count").textContent = `Reintentando ${livePreviewRetryCount}/2…`;
+      } else {
+        pages.querySelector(".preview-error")?.remove();
+        pages.insertAdjacentHTML("beforeend", `<p class="preview-error">${esc(error.message)} <button type="button" data-retry-preview>Reintentar</button></p>`);
+        document.querySelector("#editor-page-count").textContent = hadPreview ? "Vista anterior disponible" : "No disponible";
+      }
+    } finally {
+      clearTimeout(requestTimeout);
+      if (pdf) await pdf.destroy().catch(() => {});
+      livePreviewRunning = false;
+      if (livePreviewDirty) scheduleTemplatePreview(retryDelay || 160, retryDelay > 0);
     }
+  }
+
+  function loadPdfJs() {
+    if (!pdfJsPromise) {
+      pdfJsPromise = import("/vendor/pdfjs/pdf.min.mjs").then(module => {
+        module.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
+        return module;
+      }).catch(error => { pdfJsPromise = null; throw error; });
+    }
+    return pdfJsPromise;
   }
 
   function looksLikeHtml(content) { return /<(p|div|h[1-3]|ul|ol|li|strong|b|em|i|u|br)\b/i.test(String(content || "")); }

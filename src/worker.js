@@ -462,7 +462,8 @@ async function buildTemplatePdf(env, title, content, backgroundKey = null) {
       const size = block.tag === "h1" ? 15 : block.tag === "h2" ? 13 : block.tag === "h3" ? 11.5 : (compact ? 9.1 : 9.7);
       const lines = wrapRichRuns(block.runs, run => fontFor(run, heading), run => richFontSize(run, size), 452);
       if (!lines.length) { y -= heading ? size * 1.35 : (compact ? 11.7 : 13.5); continue; }
-      for (const line of lines) {
+      for (let lineIndex=0; lineIndex<lines.length; lineIndex++) {
+        const line = lines[lineIndex];
         const lineSize = line.length ? Math.max(...line.map(segment => segment.size), size) : size;
         const lineHeight = heading ? lineSize * 1.35 : lineSize * (compact ? 1.28 : 1.4);
         if (y - lineHeight < 76) addPage();
@@ -470,11 +471,7 @@ async function buildTemplatePdf(env, title, content, backgroundKey = null) {
         let x = 80;
         if (block.align === "center") x += (452 - lineWidth) / 2;
         if (block.align === "right") x += 452 - lineWidth;
-        for (const segment of line) {
-          page.drawText(segment.text, { x, y, size:segment.size, font: segment.font, color: heading ? navy : ink });
-          if (segment.underline) page.drawLine({ start:{ x, y:y - 1.5 }, end:{ x:x + segment.width, y:y - 1.5 }, thickness:.65, color:heading ? navy : ink });
-          x += segment.width;
-        }
+        drawRichLine(page, line, x, y, heading ? navy : ink, block.align === "justify" && lineIndex < lines.length - 1 ? 452 : null);
         y -= lineHeight;
       }
       y -= heading ? 6 : 4;
@@ -613,6 +610,26 @@ function wrapRichRuns(runs, fontFor, sizeFor, width) {
     }
   }
   pushLine(); return lines;
+}
+
+function drawRichLine(page, line, startX, y, color, justifyWidth = null) {
+  const lineWidth = line.reduce((total, segment) => total + segment.width, 0);
+  const spaces = line.reduce((total, segment) => total + (segment.text.match(/ /g)?.length || 0), 0);
+  const extraSpace = justifyWidth && spaces ? Math.max(0, justifyWidth - lineWidth) / spaces : 0;
+  let x = startX;
+  for (const segment of line) {
+    const segmentStart = x;
+    for (const part of segment.text.split(/( +)/)) {
+      if (!part) continue;
+      if (/^ +$/.test(part)) {
+        x += segment.font.widthOfTextAtSize(part, segment.size) + extraSpace * part.length;
+        continue;
+      }
+      page.drawText(part, { x, y, size:segment.size, font:segment.font, color });
+      x += segment.font.widthOfTextAtSize(part, segment.size);
+    }
+    if (segment.underline) page.drawLine({ start:{ x:segmentStart, y:y - 1.5 }, end:{ x, y:y - 1.5 }, thickness:.65, color });
+  }
 }
 
 function wrapPdfText(text, font, size, width) {
